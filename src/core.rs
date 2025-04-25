@@ -89,22 +89,40 @@ impl Element {
 }
 
 impl LayoutContext {
-    pub fn create_context() -> LayoutContext {
-        LayoutContext::default()
+    pub fn create_context(width: f32, height: f32) -> LayoutContext {
+        LayoutContext {
+            root_dimensions: Dimensions { width, height },
+            ..Default::default()
+        }
     }
 
     pub fn begin_layout(&mut self) {
         self.element_stack.clear();
         self.top_id = 1;
-        self.element_stack
-            .push_back(Element::new(0, Rc::new(RefCell::new(ElementConfig::default()))));
+        self.element_stack.push_back(Element::new(
+            0,
+            Rc::new(RefCell::new(ElementConfig {
+                width: SizingConfig::fixed(self.root_dimensions.width),
+                height: SizingConfig::fixed(self.root_dimensions.height),
+                ..Default::default()
+            })),
+        ));
     }
 
     pub fn end_layout(&mut self) {
-        let root_element = self
+        let mut root_element = self
             .element_stack
             .pop_back()
             .expect("Root Element must always be there.");
+
+        // configuring root element
+        {
+            let root_config = root_element.element_config.borrow();
+
+            // root element always sized as Fixed.
+            root_element.dimensions.width = root_config.width.max_val;
+            root_element.dimensions.height = root_config.height.max_val;
+        }
 
         LayoutContext::recursive_dbg(&root_element);
     }

@@ -13,6 +13,7 @@ pub struct Element {
 pub struct LayoutContext {
     pub element_stack: VecDeque<Element>,
     pub top_id: u64,
+    pub root_dimensions: Dimensions,
 }
 
 #[derive(Clone)]

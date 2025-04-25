@@ -7,7 +7,7 @@ struct ExampleObj {
 }
 
 pub fn main() {
-    let mut layout_context = LayoutContext::create_context();
+    let mut layout_context = LayoutContext::create_context(1280., 720.);
 
     let obj: ExampleObj = ExampleObj {
         config: ElementConfig::new(ElementConfig {
