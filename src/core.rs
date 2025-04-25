@@ -1,10 +1,10 @@
+use std::{cell::RefCell, rc::Rc};
+
 use crate::data_type::*;
 
 impl ElementConfig {
-    pub fn new() -> ElementConfig {
-        ElementConfig {
-            ..Default::default()
-        }
+    pub fn new(config: ElementConfig) -> Rc<RefCell<ElementConfig>> {
+        Rc::new(RefCell::new(config))
     }
 }
 
@@ -76,7 +76,7 @@ impl AlignmentConfig {
 }
 
 impl Element {
-    pub fn new(id: u64, element_config: ElementConfig) -> Element {
+    pub fn new(id: u64, element_config: Rc<RefCell<ElementConfig>>) -> Element {
         Element {
             dimensions: Dimensions::default(),
             positions: Positions::default(),
@@ -97,7 +97,7 @@ impl LayoutContext {
         self.element_stack.clear();
         self.top_id = 1;
         self.element_stack
-            .push_back(Element::new(0, ElementConfig::default()));
+            .push_back(Element::new(0, Rc::new(RefCell::new(ElementConfig::default()))));
     }
 
     pub fn end_layout(&mut self) {
@@ -124,7 +124,7 @@ impl LayoutContext {
         }
     }
 
-    fn open_element(&mut self, element_config: ElementConfig) {
+    fn open_element(&mut self, element_config: Rc<RefCell<ElementConfig>>) {
         self.element_stack
             .push_back(Element::new(self.top_id, element_config));
         self.top_id += 1;
@@ -135,42 +135,49 @@ impl LayoutContext {
             .element_stack
             .pop_back()
             .expect("There must be an element here.");
-        let current_config = &current_element.element_config;
-
-        if let SizingType::Fixed = current_config.width.sizing_type {
-            current_element.dimensions.width = current_config.width.max_val
-        }
-
-        if let SizingType::Fixed = current_config.height.sizing_type {
-            current_element.dimensions.height = current_config.height.max_val
-        }
 
         let mut parent_element = self
             .element_stack
             .pop_back()
             .expect("It must have a parent element.");
-        let parent_config = &parent_element.element_config;
 
-        match parent_config.layout_direction {
-            LayoutDirection::LeftToRight => {
-                parent_element.dimensions.width += current_element.dimensions.width;
-                parent_element.dimensions.height = parent_element
-                    .dimensions
-                    .height
-                    .max(current_element.dimensions.height);
-                current_element.positions.x = parent_element.positions.x + parent_element.child_position_offset;
-                current_element.positions.y = parent_element.positions.y;
-                parent_element.child_position_offset += current_element.dimensions.width;
+        // borrow scoping
+        {
+            let current_config = &current_element.element_config.borrow();
+
+            if let SizingType::Fixed = current_config.width.sizing_type {
+                current_element.dimensions.width = current_config.width.max_val
             }
-            LayoutDirection::TopToBottom => {
-                parent_element.dimensions.width = parent_element
-                    .dimensions
-                    .width
-                    .max(current_element.dimensions.width);
-                parent_element.dimensions.height += current_element.dimensions.height;
-                current_element.positions.x = parent_element.positions.x;
-                current_element.positions.y = parent_element.positions.y + parent_element.child_position_offset;
-                parent_element.child_position_offset += current_element.dimensions.height;
+
+            if let SizingType::Fixed = current_config.height.sizing_type {
+                current_element.dimensions.height = current_config.height.max_val
+            }
+
+            let parent_config = &parent_element.element_config.borrow();
+
+            match parent_config.layout_direction {
+                LayoutDirection::LeftToRight => {
+                    parent_element.dimensions.width += current_element.dimensions.width;
+                    parent_element.dimensions.height = parent_element
+                        .dimensions
+                        .height
+                        .max(current_element.dimensions.height);
+                    current_element.positions.x =
+                        parent_element.positions.x + parent_element.child_position_offset;
+                    current_element.positions.y = parent_element.positions.y;
+                    parent_element.child_position_offset += current_element.dimensions.width;
+                }
+                LayoutDirection::TopToBottom => {
+                    parent_element.dimensions.width = parent_element
+                        .dimensions
+                        .width
+                        .max(current_element.dimensions.width);
+                    parent_element.dimensions.height += current_element.dimensions.height;
+                    current_element.positions.x = parent_element.positions.x;
+                    current_element.positions.y =
+                        parent_element.positions.y + parent_element.child_position_offset;
+                    parent_element.child_position_offset += current_element.dimensions.height;
+                }
             }
         }
 
@@ -180,7 +187,7 @@ impl LayoutContext {
 
     pub fn add_element(
         &mut self,
-        element_config: ElementConfig,
+        element_config: Rc<RefCell<ElementConfig>>,
         inner_layout: Option<fn(&mut LayoutContext)>,
     ) {
         self.open_element(element_config);

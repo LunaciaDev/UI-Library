@@ -1,11 +1,11 @@
-use std::collections::VecDeque;
+use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 pub struct Element {
     pub dimensions: Dimensions,
     pub positions: Positions,
     pub childs: Vec<Element>,
     pub id: u64,
-    pub element_config: ElementConfig,
+    pub element_config: Rc<RefCell<ElementConfig>>,
     pub child_position_offset: f32,
 }
 
@@ -15,6 +15,7 @@ pub struct LayoutContext {
     pub top_id: u64,
 }
 
+#[derive(Clone)]
 pub struct ElementConfig {
     pub width: SizingConfig,
     pub height: SizingConfig,
@@ -24,6 +25,7 @@ pub struct ElementConfig {
     pub layout_direction: LayoutDirection,
 }
 
+#[derive(Clone)]
 pub struct PaddingConfig {
     pub left: f32,
     pub right: f32,
@@ -31,6 +33,7 @@ pub struct PaddingConfig {
     pub bottom: f32,
 }
 
+#[derive(Clone)]
 pub struct SizingConfig {
     pub sizing_type: SizingType,
     pub min_val: f32,
@@ -38,6 +41,7 @@ pub struct SizingConfig {
     pub percent: f32,
 }
 
+#[derive(Clone)]
 pub enum SizingType {
     Fixed,
     Fit,
@@ -45,23 +49,27 @@ pub enum SizingType {
     Percent,
 }
 
+#[derive(Clone)]
 pub enum HorizontalAlignment {
     Left,
     Center,
     Right,
 }
 
+#[derive(Clone)]
 pub enum VerticalAlignment {
     Top,
     Center,
     Bottom,
 }
 
+#[derive(Clone)]
 pub enum LayoutDirection {
     LeftToRight,
     TopToBottom,
 }
 
+#[derive(Clone)]
 pub struct AlignmentConfig {
     pub align_y: VerticalAlignment,
     pub align_x: HorizontalAlignment,
