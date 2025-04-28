@@ -20,14 +20,14 @@ pub fn main() {
     layout_context.begin_layout();
     layout_context.add_element(
         Rc::clone(&(obj.config)),
-        Some(|layout_context| {
+        |layout_context| {
             layout_context.add_element(
                 ElementConfig::new(ElementConfig {
                     width: SizingConfig::fixed(100.),
                     height: SizingConfig::fixed(50.),
                     ..Default::default()
                 }),
-                None,
+                |_|{},
             );
 
             layout_context.add_element(
@@ -36,11 +36,9 @@ pub fn main() {
                     height: SizingConfig::fixed(100.),
                     ..Default::default()
                 }),
-                None,
+                |_|{},
             );
-        }),
+        },
     );
     layout_context.end_layout();
-
-    obj.config.borrow_mut().padding = PaddingConfig::same_padding(5.);
 }

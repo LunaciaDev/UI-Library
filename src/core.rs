@@ -6,6 +6,10 @@ impl ElementConfig {
     pub fn new(config: ElementConfig) -> Rc<RefCell<ElementConfig>> {
         Rc::new(RefCell::new(config))
     }
+
+    pub fn new_from(config: Rc<RefCell<ElementConfig>>) -> Rc<RefCell<ElementConfig>> {
+        Rc::new(RefCell::new(config.borrow().clone()))
+    }
 }
 
 impl SizingConfig {
@@ -206,12 +210,10 @@ impl LayoutContext {
     pub fn add_element(
         &mut self,
         element_config: Rc<RefCell<ElementConfig>>,
-        inner_layout: Option<fn(&mut LayoutContext)>,
+        inner_layout: fn(&mut LayoutContext),
     ) {
         self.open_element(element_config);
-        if let Some(inner_layout) = inner_layout {
-            inner_layout(self);
-        }
+        inner_layout(self);
         self.close_element();
     }
 }
