@@ -1,6 +1,6 @@
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-pub struct Element {
+pub(crate) struct Element {
     pub dimensions: Dimensions,
     pub positions: Positions,
     pub childs: Vec<Element>,
@@ -11,9 +11,10 @@ pub struct Element {
 
 #[derive(Default)]
 pub struct LayoutContext {
-    pub element_stack: VecDeque<Element>,
-    pub top_id: u64,
-    pub root_dimensions: Dimensions,
+    // User need an instance of this struct in order to do anything, but all member must be hidden
+    pub(crate) element_stack: VecDeque<Element>,
+    pub(crate) top_id: u64,
+    pub(crate) root_dimensions: Dimensions,
 }
 
 #[derive(Clone)]

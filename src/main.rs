@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use ui_library::{ElementConfig, LayoutContext, PaddingConfig, SizingConfig};
+use ui_library::{ElementConfig, LayoutContext, SizingConfig};
 
 struct ExampleObj {
     pub config: Rc<RefCell<ElementConfig>>,
