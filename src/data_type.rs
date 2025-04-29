@@ -3,10 +3,10 @@ use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 pub(crate) struct Element {
     pub dimensions: Dimensions,
     pub positions: Positions,
-    pub childs: Vec<Element>,
+    pub childs: Vec<Rc<RefCell<Element>>>,
     pub id: u64,
     pub element_config: Rc<RefCell<ElementConfig>>,
-    pub child_position_offset: f32,
+    pub remaining_dimensions: Dimensions,
 }
 
 #[derive(Default)]
@@ -15,9 +15,10 @@ pub struct LayoutContext {
     pub(crate) element_stack: VecDeque<Element>,
     pub(crate) top_id: u64,
     pub(crate) root_dimensions: Dimensions,
+    pub(crate) element_chain_bottomup: Vec<Rc<RefCell<Element>>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct ElementConfig {
     pub width: SizingConfig,
     pub height: SizingConfig,
@@ -27,7 +28,7 @@ pub struct ElementConfig {
     pub layout_direction: LayoutDirection,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct PaddingConfig {
     pub left: f32,
     pub right: f32,
@@ -35,7 +36,7 @@ pub struct PaddingConfig {
     pub bottom: f32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct SizingConfig {
     pub sizing_type: SizingType,
     pub min_val: f32,
@@ -43,7 +44,7 @@ pub struct SizingConfig {
     pub percent: f32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum SizingType {
     Fixed,
     Fit,
@@ -51,27 +52,27 @@ pub enum SizingType {
     Percent,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum HorizontalAlignment {
     Left,
     Center,
     Right,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum VerticalAlignment {
     Top,
     Center,
     Bottom,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum LayoutDirection {
     LeftToRight,
     TopToBottom,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct AlignmentConfig {
     pub align_y: VerticalAlignment,
     pub align_x: HorizontalAlignment,

@@ -8,7 +8,7 @@ impl ElementConfig {
     }
 
     pub fn new_from(config: Rc<RefCell<ElementConfig>>) -> Rc<RefCell<ElementConfig>> {
-        Rc::new(RefCell::new(config.borrow().clone()))
+        Rc::new(RefCell::new(*config.borrow()))
     }
 }
 
@@ -87,7 +87,7 @@ impl Element {
             childs: Vec::new(),
             id,
             element_config,
-            child_position_offset: 0.,
+            remaining_dimensions: Dimensions::default(),
         }
     }
 }
@@ -113,25 +113,136 @@ impl LayoutContext {
         ));
     }
 
-    pub fn end_layout(&mut self) {
-        let mut root_element = self
-            .element_stack
-            .pop_back()
-            .expect("Root Element must always be there.");
+    fn fit_sizing(&mut self, x_axis: bool) {
+        for element in &self.element_chain_bottomup {
+            let mut element = element.borrow_mut();
+            let config = element.element_config.borrow();
 
-        // configuring root element
-        {
-            let root_config = root_element.element_config.borrow();
+            if x_axis {
+                let width_config = config.width;
+                let layout_direction = config.layout_direction;
+                drop(config);
 
-            // root element always sized as Fixed.
-            root_element.dimensions.width = root_config.width.max_val;
-            root_element.dimensions.height = root_config.height.max_val;
+                if let SizingType::Fit = width_config.sizing_type {
+                    match layout_direction {
+                        LayoutDirection::LeftToRight => {
+                            let mut width_accumulator = 0.;
+
+                            for child in &element.childs {
+                                width_accumulator += child.borrow().dimensions.width;
+                            }
+
+                            element.dimensions.width = width_accumulator;
+                        }
+                        LayoutDirection::TopToBottom => {
+                            let mut max_width: f32 = 0.;
+                            
+                            for child in &element.childs {
+                                max_width = max_width.max(child.borrow().dimensions.width);
+                            }
+
+                            element.dimensions.width = max_width;
+                        }
+                    }
+                }
+            } else {
+                let height_config = config.height;
+                let layout_direction = config.layout_direction;
+                drop(config);
+
+                if let SizingType::Fit = height_config.sizing_type {
+                    match layout_direction {
+                        LayoutDirection::LeftToRight => {
+                            let mut max_height: f32 = 0.;
+
+                            for child in &element.childs {
+                                max_height = max_height.max(child.borrow().dimensions.height);
+                            }
+
+                            element.dimensions.height = max_height;
+                        }
+                        LayoutDirection::TopToBottom => {
+                            let mut height_accumulator = 0.;
+                            
+                            for child in &element.childs {
+                                height_accumulator += child.borrow().dimensions.height;
+                            }
+
+                            element.dimensions.height = height_accumulator;
+                        }
+                    }
+                }
+            }
         }
-
-        LayoutContext::recursive_dbg(&root_element);
     }
 
-    fn recursive_dbg(element: &Element) {
+    pub fn position_element(&mut self) {
+        for element in (self.element_chain_bottomup).iter().rev() {
+            let element = element.borrow_mut();
+            let element_config = element.element_config.borrow();
+            
+            let padding_config = element_config.padding;
+            let child_gap = element_config.gap;
+            let layout_direction = element_config.layout_direction;
+            let mut child_offset = Positions::default();
+
+            drop(element_config);
+
+            child_offset.x = padding_config.left;
+            child_offset.y = padding_config.right;
+
+            for child in &element.childs {
+                let mut child = child.borrow_mut();
+
+                child.positions.x = element.positions.x + child_offset.x;
+                child.positions.y = element.positions.y + child_offset.y;
+
+                match layout_direction {
+                    LayoutDirection::LeftToRight => {
+                        child_offset.x += child_gap + child.dimensions.width;
+                    }
+                    LayoutDirection::TopToBottom => {
+                        child_offset.y += child_gap + child.dimensions.height;
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn end_layout(&mut self) {
+        let root_element = Rc::new(RefCell::new(
+            self.element_stack
+                .pop_back()
+                .expect("Root Element must always be there."),
+        ));
+
+        let root_element_clone = Rc::clone(&root_element);
+
+        self.element_chain_bottomup.push(root_element);
+
+        // process the configuration
+
+        // Step 1: Fit Sizing Width
+        self.fit_sizing(true);
+
+        // Step 2: Grow Width
+
+        // Step 3: Wrap Text
+
+        // Step 4: Fit Sizing Height
+        self.fit_sizing(false);
+
+        // Step 5: Grow Height
+
+        // Step 6: Positions
+        self.position_element();
+
+        LayoutContext::recursive_dbg(root_element_clone);
+    }
+
+    fn recursive_dbg(element: Rc<RefCell<Element>>) {
+        let element = element.borrow();
+
         println!(
             "Element id: {} has x: {}, y: {}, width: {}, height: {}",
             element.id,
@@ -142,7 +253,7 @@ impl LayoutContext {
         );
 
         for child in &element.childs {
-            LayoutContext::recursive_dbg(child);
+            LayoutContext::recursive_dbg(Rc::clone(child));
         }
     }
 
@@ -163,47 +274,29 @@ impl LayoutContext {
             .pop_back()
             .expect("It must have a parent element.");
 
-        // borrow scoping
+        // Configure constant values
         {
-            let current_config = &current_element.element_config.borrow();
+            let element_config = current_element.element_config.borrow();
 
-            if let SizingType::Fixed = current_config.width.sizing_type {
-                current_element.dimensions.width = current_config.width.max_val
+            // Fixed Sizing + Padding content limitation
+            if let SizingType::Fixed = element_config.width.sizing_type {
+                current_element.dimensions.width = element_config.width.max_val;
+                current_element.remaining_dimensions.width = current_element.dimensions.width
+                    - element_config.padding.left
+                    - element_config.padding.right;
             }
-
-            if let SizingType::Fixed = current_config.height.sizing_type {
-                current_element.dimensions.height = current_config.height.max_val
-            }
-
-            let parent_config = &parent_element.element_config.borrow();
-
-            match parent_config.layout_direction {
-                LayoutDirection::LeftToRight => {
-                    parent_element.dimensions.width += current_element.dimensions.width;
-                    parent_element.dimensions.height = parent_element
-                        .dimensions
-                        .height
-                        .max(current_element.dimensions.height);
-                    current_element.positions.x =
-                        parent_element.positions.x + parent_element.child_position_offset;
-                    current_element.positions.y = parent_element.positions.y;
-                    parent_element.child_position_offset += current_element.dimensions.width;
-                }
-                LayoutDirection::TopToBottom => {
-                    parent_element.dimensions.width = parent_element
-                        .dimensions
-                        .width
-                        .max(current_element.dimensions.width);
-                    parent_element.dimensions.height += current_element.dimensions.height;
-                    current_element.positions.x = parent_element.positions.x;
-                    current_element.positions.y =
-                        parent_element.positions.y + parent_element.child_position_offset;
-                    parent_element.child_position_offset += current_element.dimensions.height;
-                }
+            if let SizingType::Fixed = element_config.height.sizing_type {
+                current_element.dimensions.height = element_config.height.max_val;
+                current_element.remaining_dimensions.height = current_element.dimensions.height
+                    - element_config.padding.top
+                    - element_config.padding.bottom;
             }
         }
 
-        parent_element.childs.push(current_element);
+        let current_element = Rc::new(RefCell::new(current_element));
+
+        parent_element.childs.push(Rc::clone(&current_element));
+        self.element_chain_bottomup.push(current_element);
         self.element_stack.push_back(parent_element);
     }
 
