@@ -11,34 +11,40 @@ pub fn main() {
 
     let obj: ExampleObj = ExampleObj {
         config: ElementConfig::new(ElementConfig {
-            width: SizingConfig::fit(),
+            width: SizingConfig::fixed(400.),
             height: SizingConfig::fit(),
             ..Default::default()
         }),
     };
 
     layout_context.begin_layout();
-    layout_context.add_element(
-        Rc::clone(&(obj.config)),
-        |layout_context| {
-            layout_context.add_element(
-                ElementConfig::new(ElementConfig {
-                    width: SizingConfig::fixed(100.),
-                    height: SizingConfig::fixed(50.),
-                    ..Default::default()
-                }),
-                |_|{},
-            );
+    layout_context.add_element(Rc::clone(&(obj.config)), |layout_context| {
+        layout_context.add_element(
+            ElementConfig::new(ElementConfig {
+                width: SizingConfig::fixed(100.),
+                height: SizingConfig::fixed(50.),
+                ..Default::default()
+            }),
+            |_| {},
+        );
 
-            layout_context.add_element(
-                ElementConfig::new(ElementConfig {
-                    width: SizingConfig::fixed(150.),
-                    height: SizingConfig::fixed(100.),
-                    ..Default::default()
-                }),
-                |_|{},
-            );
-        },
-    );
+        layout_context.add_element(
+            ElementConfig::new(ElementConfig {
+                width: SizingConfig::grow(),
+                height: SizingConfig::fixed(50.),
+                ..Default::default()
+            }),
+            |_| {},
+        );
+
+        layout_context.add_element(
+            ElementConfig::new(ElementConfig {
+                width: SizingConfig::fixed(150.),
+                height: SizingConfig::fixed(100.),
+                ..Default::default()
+            }),
+            |_| {},
+        );
+    });
     layout_context.end_layout();
 }

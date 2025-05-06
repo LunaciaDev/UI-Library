@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, cmp::Ordering, rc::Rc};
 
 use crate::data_type::*;
 
@@ -13,11 +13,20 @@ impl ElementConfig {
 }
 
 impl SizingConfig {
-    pub fn grow(min: f32, max: f32) -> SizingConfig {
+    pub fn grow_clamped(min: f32, max: f32) -> SizingConfig {
         SizingConfig {
             sizing_type: SizingType::Grow,
             min_val: min,
             max_val: max,
+            ..Default::default()
+        }
+    }
+
+    pub fn grow() -> SizingConfig {
+        SizingConfig {
+            sizing_type: SizingType::Grow,
+            min_val: 0.,
+            max_val: 0.,
             ..Default::default()
         }
     }
@@ -87,7 +96,7 @@ impl Element {
             childs: Vec::new(),
             id,
             element_config,
-            remaining_dimensions: Dimensions::default(),
+            grow_on_percent_mark: false,
         }
     }
 }
@@ -118,14 +127,14 @@ impl LayoutContext {
             let mut element = element.borrow_mut();
             let config = element.element_config.borrow();
 
-            if x_axis {
-                let width_config = config.width;
-                let layout_direction = config.layout_direction;
-                drop(config);
+            let sizing_config = config.width;
+            let layout_direction = config.layout_direction;
+            drop(config);
 
-                if let SizingType::Fit = width_config.sizing_type {
-                    match layout_direction {
-                        LayoutDirection::LeftToRight => {
+            if let SizingType::Fit = sizing_config.sizing_type {
+                match layout_direction {
+                    LayoutDirection::LeftToRight => {
+                        if x_axis {
                             let mut width_accumulator = 0.;
 
                             for child in &element.childs {
@@ -133,26 +142,7 @@ impl LayoutContext {
                             }
 
                             element.dimensions.width = width_accumulator;
-                        }
-                        LayoutDirection::TopToBottom => {
-                            let mut max_width: f32 = 0.;
-                            
-                            for child in &element.childs {
-                                max_width = max_width.max(child.borrow().dimensions.width);
-                            }
-
-                            element.dimensions.width = max_width;
-                        }
-                    }
-                }
-            } else {
-                let height_config = config.height;
-                let layout_direction = config.layout_direction;
-                drop(config);
-
-                if let SizingType::Fit = height_config.sizing_type {
-                    match layout_direction {
-                        LayoutDirection::LeftToRight => {
+                        } else {
                             let mut max_height: f32 = 0.;
 
                             for child in &element.childs {
@@ -161,9 +151,19 @@ impl LayoutContext {
 
                             element.dimensions.height = max_height;
                         }
-                        LayoutDirection::TopToBottom => {
+                    }
+                    LayoutDirection::TopToBottom => {
+                        if x_axis {
+                            let mut max_width: f32 = 0.;
+
+                            for child in &element.childs {
+                                max_width = max_width.max(child.borrow().dimensions.width);
+                            }
+
+                            element.dimensions.width = max_width;
+                        } else {
                             let mut height_accumulator = 0.;
-                            
+
                             for child in &element.childs {
                                 height_accumulator += child.borrow().dimensions.height;
                             }
@@ -176,11 +176,11 @@ impl LayoutContext {
         }
     }
 
-    pub fn position_element(&mut self) {
+    fn position_element(&mut self) {
         for element in (self.element_chain_bottomup).iter().rev() {
             let element = element.borrow_mut();
             let element_config = element.element_config.borrow();
-            
+
             let padding_config = element_config.padding;
             let child_gap = element_config.gap;
             let layout_direction = element_config.layout_direction;
@@ -209,6 +209,260 @@ impl LayoutContext {
         }
     }
 
+    fn percent_sizing(&mut self, x_axis: bool) {
+        for element in (self.element_chain_bottomup).iter().rev() {
+            let parent = element.borrow();
+
+            for child in &parent.childs {
+                let mut child = child.borrow_mut();
+                let child_config = child.element_config.borrow();
+
+                if x_axis {
+                    if let SizingType::Grow = parent.element_config.borrow().width.sizing_type {
+                        drop(child_config);
+                        child.grow_on_percent_mark = true;
+                        continue;
+                    }
+
+                    if let SizingType::Percent = child_config.width.sizing_type {
+                        let percentage = child_config.width.percent;
+                        drop(child_config);
+
+                        child.dimensions.width = parent.dimensions.width * percentage;
+                    }
+                } else {
+                    if let SizingType::Grow = parent.element_config.borrow().height.sizing_type {
+                        drop(child_config);
+                        child.grow_on_percent_mark = true;
+                        continue;
+                    }
+
+                    if let SizingType::Percent = child_config.height.sizing_type {
+                        let percentage = child_config.height.percent;
+                        drop(child_config);
+
+                        child.dimensions.height = parent.dimensions.height * percentage;
+                    }
+                }
+            }
+        }
+    }
+
+    fn grow_sizing(&mut self, x_axis: bool) {
+        for element in (self.element_chain_bottomup).iter().rev() {
+            let element = element.borrow_mut();
+            let element_config = element.element_config.borrow();
+            let mut grow_child_vec: Vec<Rc<RefCell<Element>>> = Vec::new();
+            let mut remaining_dimensions: f32;
+
+            if x_axis {
+                remaining_dimensions = element.dimensions.width
+                    - element_config.padding.left
+                    - element_config.padding.right;
+            } else {
+                remaining_dimensions = element.dimensions.height
+                    - element_config.padding.top
+                    - element_config.padding.bottom;
+            }
+
+            for child_ref in &element.childs {
+                let child = child_ref.borrow();
+                let child_config = child.element_config.borrow();
+
+                if x_axis {
+                    if let SizingType::Grow = child_config.width.sizing_type {
+                        grow_child_vec.push(Rc::clone(child_ref));
+                        continue;
+                    }
+
+                    remaining_dimensions -= child.dimensions.width;
+                } else {
+                    if let SizingType::Grow = child_config.height.sizing_type {
+                        grow_child_vec.push(Rc::clone(child_ref));
+                        continue;
+                    }
+
+                    remaining_dimensions -= child.dimensions.height;
+                }
+            }
+
+            grow_child_vec.sort_by(|a, b| -> Ordering {
+                let a = a.borrow();
+                let b = b.borrow();
+
+                if x_axis {
+                    if a.dimensions.width > b.dimensions.width {
+                        return Ordering::Greater;
+                    }
+
+                    if a.dimensions.width < b.dimensions.width {
+                        return Ordering::Less;
+                    }
+
+                    Ordering::Equal
+                } else {
+                    if a.dimensions.height > b.dimensions.height {
+                        return Ordering::Greater;
+                    }
+
+                    if a.dimensions.height < b.dimensions.height {
+                        return Ordering::Less;
+                    }
+
+                    Ordering::Equal
+                }
+            });
+
+            let mut min_sizing: f32 = 0.;
+            let mut index = 0;
+
+            // grow all childs to the biggest child.
+            while index < grow_child_vec.len() {
+                if x_axis {
+                    let element_size = grow_child_vec[index].borrow().dimensions.width;
+
+                    if element_size > min_sizing {
+                        min_sizing = element_size;
+
+                        if (remaining_dimensions / (index + 1) as f32) < min_sizing {
+                            min_sizing = remaining_dimensions / (index + 1) as f32;
+
+                            // grow each element toward the final min_sizing
+                            let mut id = 0;
+                            while id < index {
+                                let mut element = grow_child_vec[id].borrow_mut();
+                                let element_max_val = element.element_config.borrow().width.max_val;
+
+                                // clamp the grow to the max_value, if applicable
+                                if element_max_val != 0. {
+                                    let delta = element_max_val - element.dimensions.width;
+                                    remaining_dimensions -= delta;
+                                    element.dimensions.width = element_max_val;
+
+                                    drop(element);
+
+                                    grow_child_vec.remove(id);
+                                    index -= 1;
+                                    continue;
+                                }
+
+                                element.dimensions.width = min_sizing;
+                                id += 1;
+                            }
+
+                            break;
+                        }
+
+                        // grow each element fairly to the min_sizing
+                        let mut id = 0;
+                        while id < index {
+                            let mut element = grow_child_vec[id].borrow_mut();
+                            let element_max_val = element.element_config.borrow().width.max_val;
+
+                            // clamp the grow to the max_value, if applicable
+                            if element_max_val != 0. {
+                                let delta = element_max_val - element.dimensions.width;
+                                remaining_dimensions -= delta;
+                                element.dimensions.width = element_max_val;
+
+                                drop(element);
+
+                                grow_child_vec.remove(id);
+                                index -= 1;
+                                id += 1;
+                                continue;
+                            }
+
+                            let delta = min_sizing - element.dimensions.width;
+
+                            element.dimensions.width = min_sizing;
+                            remaining_dimensions -= delta;
+                            id += 1;
+                        }
+                    }
+                } else {
+                    let element_size = grow_child_vec[index].borrow().dimensions.height;
+
+                    if element_size > min_sizing {
+                        min_sizing = element_size;
+
+                        if (remaining_dimensions / (index + 1) as f32) < min_sizing {
+                            min_sizing = remaining_dimensions / (index + 1) as f32;
+
+                            // grow each element toward the final min_sizing
+                            let mut id = 0;
+                            while id < index {
+                                let mut element = grow_child_vec[id].borrow_mut();
+                                let element_max_val = element.element_config.borrow().height.max_val;
+
+                                // clamp the grow to the max_value, if applicable
+                                if element_max_val != 0. {
+                                    let delta = element_max_val - element.dimensions.height;
+                                    remaining_dimensions -= delta;
+                                    element.dimensions.height = element_max_val;
+
+                                    drop(element);
+
+                                    grow_child_vec.remove(id);
+                                    index -= 1;
+                                    continue;
+                                }
+
+                                element.dimensions.height = min_sizing;
+                                id += 1;
+                            }
+
+                            break;
+                        }
+
+                        // grow each element fairly to the min_sizing
+                        let mut id = 0;
+                        while id < index {
+                            let mut element = grow_child_vec[id].borrow_mut();
+                            let element_max_val = element.element_config.borrow().height.max_val;
+
+                            // clamp the grow to the max_value, if applicable
+                            if element_max_val != 0. {
+                                let delta = element_max_val - element.dimensions.height;
+                                remaining_dimensions -= delta;
+                                element.dimensions.height = element_max_val;
+
+                                drop(element);
+
+                                grow_child_vec.remove(id);
+                                index -= 1;
+                                id += 1;
+                                continue;
+                            }
+
+                            let delta = min_sizing - element.dimensions.height;
+
+                            element.dimensions.height = min_sizing;
+                            remaining_dimensions -= delta;
+                            id += 1;
+                        }
+                    }
+                }
+
+                index += 1;
+            }
+
+            // distribute remaining value equally
+            remaining_dimensions /= grow_child_vec.len() as f32;
+
+            for element in &grow_child_vec {
+                let mut element = element.borrow_mut();
+
+                if x_axis {
+                    element.dimensions.width += remaining_dimensions;
+                }
+                else {
+                    element.dimensions.height += remaining_dimensions;
+                }
+            }
+        }
+    }
+
     pub fn end_layout(&mut self) {
         let root_element = Rc::new(RefCell::new(
             self.element_stack
@@ -221,20 +475,27 @@ impl LayoutContext {
         self.element_chain_bottomup.push(root_element);
 
         // process the configuration
-
         // Step 1: Fit Sizing Width
         self.fit_sizing(true);
 
-        // Step 2: Grow Width
+        // Step 2: Percentage Width
+        self.percent_sizing(true);
 
-        // Step 3: Wrap Text
+        // Step 3: Grow Width
+        self.grow_sizing(true);
 
-        // Step 4: Fit Sizing Height
+        // Step 4: Wrap Text
+
+        // Step 5: Fit Sizing Height
         self.fit_sizing(false);
 
-        // Step 5: Grow Height
+        // Step 6: Percentage Height
+        self.percent_sizing(false);
 
-        // Step 6: Positions
+        // Step 7: Grow Height
+        self.grow_sizing(false);
+
+        // Step 8: Positions
         self.position_element();
 
         LayoutContext::recursive_dbg(root_element_clone);
@@ -278,18 +539,24 @@ impl LayoutContext {
         {
             let element_config = current_element.element_config.borrow();
 
-            // Fixed Sizing + Padding content limitation
-            if let SizingType::Fixed = element_config.width.sizing_type {
-                current_element.dimensions.width = element_config.width.max_val;
-                current_element.remaining_dimensions.width = current_element.dimensions.width
-                    - element_config.padding.left
-                    - element_config.padding.right;
+            match element_config.width.sizing_type {
+                SizingType::Fixed => {
+                    current_element.dimensions.width = element_config.width.max_val;
+                }
+                SizingType::Grow => {
+                    current_element.dimensions.width = element_config.width.min_val;
+                }
+                _ => {}
             }
-            if let SizingType::Fixed = element_config.height.sizing_type {
-                current_element.dimensions.height = element_config.height.max_val;
-                current_element.remaining_dimensions.height = current_element.dimensions.height
-                    - element_config.padding.top
-                    - element_config.padding.bottom;
+
+            match element_config.height.sizing_type {
+                SizingType::Fixed => {
+                    current_element.dimensions.height = element_config.height.max_val;
+                }
+                SizingType::Grow => {
+                    current_element.dimensions.height = element_config.height.min_val;
+                }
+                _ => {}
             }
         }
 

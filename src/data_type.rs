@@ -6,7 +6,7 @@ pub(crate) struct Element {
     pub childs: Vec<Rc<RefCell<Element>>>,
     pub id: u64,
     pub element_config: Rc<RefCell<ElementConfig>>,
-    pub remaining_dimensions: Dimensions,
+    pub grow_on_percent_mark: bool,
 }
 
 #[derive(Default)]
@@ -78,11 +78,13 @@ pub struct AlignmentConfig {
     pub align_x: HorizontalAlignment,
 }
 
+#[derive(Clone, Copy)]
 pub struct Dimensions {
     pub width: f32,
     pub height: f32,
 }
 
+#[derive(Clone, Copy)]
 pub struct Positions {
     pub x: f32,
     pub y: f32,
