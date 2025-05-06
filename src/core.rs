@@ -125,11 +125,9 @@ impl LayoutContext {
     fn fit_sizing(&mut self, x_axis: bool) {
         for element in &self.element_chain_bottomup {
             let mut element = element.borrow_mut();
-            let config = element.element_config.borrow();
 
-            let sizing_config = config.width;
-            let layout_direction = config.layout_direction;
-            drop(config);
+            let sizing_config = element.element_config.borrow().width;
+            let layout_direction = element.element_config.borrow().layout_direction;
 
             if let SizingType::Fit = sizing_config.sizing_type {
                 match layout_direction {
@@ -179,17 +177,14 @@ impl LayoutContext {
     fn position_element(&mut self) {
         for element in (self.element_chain_bottomup).iter().rev() {
             let element = element.borrow_mut();
-            let element_config = element.element_config.borrow();
 
-            let padding_config = element_config.padding;
-            let child_gap = element_config.gap;
-            let layout_direction = element_config.layout_direction;
-            let mut child_offset = Positions::default();
-
-            drop(element_config);
-
-            child_offset.x = padding_config.left;
-            child_offset.y = padding_config.right;
+            let padding_config = element.element_config.borrow().padding;
+            let child_gap = element.element_config.borrow().gap;
+            let layout_direction = element.element_config.borrow().layout_direction;
+            let mut child_offset = Positions {
+                x: padding_config.left,
+                y: padding_config.right,
+            };
 
             for child in &element.childs {
                 let mut child = child.borrow_mut();
@@ -215,31 +210,38 @@ impl LayoutContext {
 
             for child in &parent.childs {
                 let mut child = child.borrow_mut();
-                let child_config = child.element_config.borrow();
 
                 if x_axis {
-                    if let SizingType::Grow = parent.element_config.borrow().width.sizing_type {
-                        drop(child_config);
+                    if matches!(
+                        parent.element_config.borrow().width.sizing_type,
+                        SizingType::Grow
+                    ) {
                         child.grow_on_percent_mark = true;
                         continue;
                     }
 
-                    if let SizingType::Percent = child_config.width.sizing_type {
-                        let percentage = child_config.width.percent;
-                        drop(child_config);
+                    if matches!(
+                        child.element_config.borrow().width.sizing_type,
+                        SizingType::Percent
+                    ) {
+                        let percentage = child.element_config.borrow().width.percent;
 
                         child.dimensions.width = parent.dimensions.width * percentage;
                     }
                 } else {
-                    if let SizingType::Grow = parent.element_config.borrow().height.sizing_type {
-                        drop(child_config);
+                    if matches!(
+                        parent.element_config.borrow().height.sizing_type,
+                        SizingType::Grow
+                    ) {
                         child.grow_on_percent_mark = true;
                         continue;
                     }
 
-                    if let SizingType::Percent = child_config.height.sizing_type {
-                        let percentage = child_config.height.percent;
-                        drop(child_config);
+                    if matches!(
+                        child.element_config.borrow().height.sizing_type,
+                        SizingType::Percent
+                    ) {
+                        let percentage = child.element_config.borrow().height.percent;
 
                         child.dimensions.height = parent.dimensions.height * percentage;
                     }
@@ -250,34 +252,73 @@ impl LayoutContext {
 
     fn grow_sizing(&mut self, x_axis: bool) {
         for element in (self.element_chain_bottomup).iter().rev() {
-            let element = element.borrow_mut();
-            let element_config = element.element_config.borrow();
+            let parent = element.borrow_mut();
+            let parent_config = parent.element_config.borrow();
+
+            /*
+               If this is a grow element, then at this stage this element must have had a concrete value
+               (since it has already passed the grow constraint from the grandparent), thus any children
+               that is marked for awaiting a concrete grow value can (and must) be solved here.
+            */
+
+            if x_axis {
+                if matches!(parent_config.width.sizing_type, SizingType::Grow) {
+                    for child in &parent.childs {
+                        let mut child = child.borrow_mut();
+
+                        if child.grow_on_percent_mark {
+                            let percentage_value = child.element_config.borrow().width.percent;
+                            child.dimensions.width = parent.dimensions.width * percentage_value;
+                            child.grow_on_percent_mark = false;
+                        }
+                    }
+                }
+            } else if matches!(parent_config.height.sizing_type, SizingType::Grow) {
+                for child in &parent.childs {
+                    let mut child = child.borrow_mut();
+
+                    if child.grow_on_percent_mark {
+                        let percentage_value = child.element_config.borrow().height.percent;
+                        child.dimensions.height = parent.dimensions.height * percentage_value;
+                        child.grow_on_percent_mark = false;
+                    }
+                }
+            }
+
             let mut grow_child_vec: Vec<Rc<RefCell<Element>>> = Vec::new();
             let mut remaining_dimensions: f32;
 
+            /*
+               Growing algorithm also depend on the layout direction of the element.
+               If it is growing alongside the layout direction, then sharing of the
+               grow value is necessary.
+               Otherwise, just give it the parent element value, surely this wont
+               bite. Heh.
+            */
+
             if x_axis {
-                remaining_dimensions = element.dimensions.width
-                    - element_config.padding.left
-                    - element_config.padding.right;
+                remaining_dimensions = parent.dimensions.width
+                    - parent_config.padding.left
+                    - parent_config.padding.right;
             } else {
-                remaining_dimensions = element.dimensions.height
-                    - element_config.padding.top
-                    - element_config.padding.bottom;
+                remaining_dimensions = parent.dimensions.height
+                    - parent_config.padding.top
+                    - parent_config.padding.bottom;
             }
 
-            for child_ref in &element.childs {
+            for child_ref in &parent.childs {
                 let child = child_ref.borrow();
                 let child_config = child.element_config.borrow();
 
                 if x_axis {
-                    if let SizingType::Grow = child_config.width.sizing_type {
+                    if matches!(child_config.width.sizing_type, SizingType::Grow) {
                         grow_child_vec.push(Rc::clone(child_ref));
                         continue;
                     }
 
                     remaining_dimensions -= child.dimensions.width;
                 } else {
-                    if let SizingType::Grow = child_config.height.sizing_type {
+                    if matches!(child_config.height.sizing_type, SizingType::Grow) {
                         grow_child_vec.push(Rc::clone(child_ref));
                         continue;
                     }
@@ -286,6 +327,8 @@ impl LayoutContext {
                 }
             }
 
+            // Sort all children that need to solve grow for by their current size.
+            // We grow these child until they have the same size, then distribute the rest evenly.
             grow_child_vec.sort_by(|a, b| -> Ordering {
                 let a = a.borrow();
                 let b = b.borrow();
@@ -319,6 +362,15 @@ impl LayoutContext {
             // grow all childs to the biggest child.
             while index < grow_child_vec.len() {
                 if x_axis {
+                    if matches!(parent_config.layout_direction, LayoutDirection::TopToBottom) {
+                        {
+                            let mut element = grow_child_vec[index].borrow_mut();
+                            element.dimensions.width += remaining_dimensions;
+                        }
+                        grow_child_vec.remove(index);
+                        continue;
+                    }
+
                     let element_size = grow_child_vec[index].borrow().dimensions.width;
 
                     if element_size > min_sizing {
@@ -381,6 +433,15 @@ impl LayoutContext {
                         }
                     }
                 } else {
+                    if matches!(parent_config.layout_direction, LayoutDirection::LeftToRight) {
+                        {
+                            let mut element = grow_child_vec[index].borrow_mut();
+                            element.dimensions.height += remaining_dimensions;
+                        }
+                        grow_child_vec.remove(index);
+                        continue;
+                    }
+
                     let element_size = grow_child_vec[index].borrow().dimensions.height;
 
                     if element_size > min_sizing {
@@ -393,7 +454,8 @@ impl LayoutContext {
                             let mut id = 0;
                             while id < index {
                                 let mut element = grow_child_vec[id].borrow_mut();
-                                let element_max_val = element.element_config.borrow().height.max_val;
+                                let element_max_val =
+                                    element.element_config.borrow().height.max_val;
 
                                 // clamp the grow to the max_value, if applicable
                                 if element_max_val != 0. {
@@ -455,8 +517,7 @@ impl LayoutContext {
 
                 if x_axis {
                     element.dimensions.width += remaining_dimensions;
-                }
-                else {
+                } else {
                     element.dimensions.height += remaining_dimensions;
                 }
             }

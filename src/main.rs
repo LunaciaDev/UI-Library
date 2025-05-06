@@ -11,7 +11,7 @@ pub fn main() {
 
     let obj: ExampleObj = ExampleObj {
         config: ElementConfig::new(ElementConfig {
-            width: SizingConfig::fixed(400.),
+            width: SizingConfig::fixed(800.),
             height: SizingConfig::fit(),
             ..Default::default()
         }),
@@ -34,7 +34,25 @@ pub fn main() {
                 height: SizingConfig::fixed(50.),
                 ..Default::default()
             }),
-            |_| {},
+            |layout_context| {
+                layout_context.add_element(
+                    ElementConfig::new(ElementConfig {
+                        width: SizingConfig::percent(0.5),
+                        height: SizingConfig::grow(),
+                        ..Default::default()
+                    }),
+                    |_| {},
+                );
+
+                layout_context.add_element(
+                    ElementConfig::new(ElementConfig {
+                        width: SizingConfig::grow(),
+                        height: SizingConfig::grow(),
+                        ..Default::default()
+                    }),
+                    |_| {},
+                );
+            },
         );
 
         layout_context.add_element(
