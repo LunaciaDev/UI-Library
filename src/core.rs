@@ -125,14 +125,14 @@ impl LayoutContext {
     fn fit_sizing(&mut self, x_axis: bool) {
         for element in &self.element_chain_bottomup {
             let mut element = element.borrow_mut();
-
-            let sizing_config = element.element_config.borrow().width;
             let layout_direction = element.element_config.borrow().layout_direction;
 
-            if let SizingType::Fit = sizing_config.sizing_type {
-                match layout_direction {
-                    LayoutDirection::LeftToRight => {
-                        if x_axis {
+            if x_axis {
+                let sizing_config = element.element_config.borrow().width;
+
+                if matches!(sizing_config.sizing_type, SizingType::Fit) {
+                    match layout_direction {
+                        LayoutDirection::LeftToRight => {
                             let mut width_accumulator = 0.;
 
                             for child in &element.childs {
@@ -140,18 +140,8 @@ impl LayoutContext {
                             }
 
                             element.dimensions.width = width_accumulator;
-                        } else {
-                            let mut max_height: f32 = 0.;
-
-                            for child in &element.childs {
-                                max_height = max_height.max(child.borrow().dimensions.height);
-                            }
-
-                            element.dimensions.height = max_height;
-                        }
-                    }
-                    LayoutDirection::TopToBottom => {
-                        if x_axis {
+                        },
+                        LayoutDirection::TopToBottom => {
                             let mut max_width: f32 = 0.;
 
                             for child in &element.childs {
@@ -159,7 +149,25 @@ impl LayoutContext {
                             }
 
                             element.dimensions.width = max_width;
-                        } else {
+                        },
+                    }
+                }
+            }
+            else {
+                let sizing_config = element.element_config.borrow().height;
+
+                if matches!(sizing_config.sizing_type, SizingType::Fit) {
+                    match layout_direction {
+                        LayoutDirection::LeftToRight => {
+                            let mut max_height: f32 = 0.;
+
+                            for child in &element.childs {
+                                max_height = max_height.max(child.borrow().dimensions.height);
+                            }
+
+                            element.dimensions.height = max_height;
+                        },
+                        LayoutDirection::TopToBottom => {
                             let mut height_accumulator = 0.;
 
                             for child in &element.childs {
@@ -167,7 +175,7 @@ impl LayoutContext {
                             }
 
                             element.dimensions.height = height_accumulator;
-                        }
+                        },
                     }
                 }
             }
@@ -176,28 +184,131 @@ impl LayoutContext {
 
     fn position_element(&mut self) {
         for element in (self.element_chain_bottomup).iter().rev() {
-            let element = element.borrow_mut();
+            let parent = element.borrow_mut();
 
-            let padding_config = element.element_config.borrow().padding;
-            let child_gap = element.element_config.borrow().gap;
-            let layout_direction = element.element_config.borrow().layout_direction;
-            let mut child_offset = Positions {
-                x: padding_config.left,
-                y: padding_config.right,
-            };
+            let padding_config = parent.element_config.borrow().padding;
+            let child_gap = parent.element_config.borrow().gap;
+            let layout_direction = parent.element_config.borrow().layout_direction;
+            let horizontal_alignment = parent.element_config.borrow().child_alignment.align_x;
+            let vertical_alignment = parent.element_config.borrow().child_alignment.align_y;
 
-            for child in &element.childs {
+            /*
+               On Alignments:
+
+               When we are aligning along the layout direction, all element act as one singular large element.
+               When we are aligning against the layout direction however, each element align individually.
+            */
+
+            let mut child_bounding_box = Dimensions::default();
+
+            for child in &parent.childs {
                 let mut child = child.borrow_mut();
-
-                child.positions.x = element.positions.x + child_offset.x;
-                child.positions.y = element.positions.y + child_offset.y;
+                let child_dimensions = child.dimensions;
 
                 match layout_direction {
                     LayoutDirection::LeftToRight => {
-                        child_offset.x += child_gap + child.dimensions.width;
+                        child_bounding_box.width += child_dimensions.width;
+
+                        match vertical_alignment {
+                            VerticalAlignment::Top => {
+                                child.positions.y = parent.positions.y + padding_config.top;
+                            }
+                            VerticalAlignment::Bottom => {
+                                child.positions.y = parent.positions.y + parent.dimensions.height
+                                    - padding_config.bottom
+                                    - child.dimensions.height;
+                            }
+                            VerticalAlignment::Center => {
+                                let height_offset = (parent.dimensions.height
+                                    - child.dimensions.height
+                                    - padding_config.top
+                                    - padding_config.bottom)
+                                    / 2.;
+                                child.positions.y = parent.positions.y + height_offset;
+                            }
+                        }
                     }
                     LayoutDirection::TopToBottom => {
-                        child_offset.y += child_gap + child.dimensions.height;
+                        child_bounding_box.height += child_dimensions.height;
+
+                        match horizontal_alignment {
+                            HorizontalAlignment::Left => {
+                                child.positions.x = parent.positions.x + padding_config.left;
+                            }
+                            HorizontalAlignment::Right => {
+                                child.positions.x = parent.positions.x + parent.dimensions.width
+                                    - padding_config.right
+                                    - child.dimensions.width;
+                            }
+                            HorizontalAlignment::Center => {
+                                let width_offset = (parent.dimensions.width
+                                    - child.dimensions.width
+                                    - padding_config.left
+                                    - padding_config.right)
+                                    / 2.;
+
+                                child.positions.x = parent.positions.x + width_offset;
+                            }
+                        }
+                    }
+                }
+            }
+
+            match layout_direction {
+                LayoutDirection::LeftToRight => {
+                    child_bounding_box.width += parent.childs.len() as f32 * child_gap;
+
+                    let mut offset = 0.;
+                    let start_x = match horizontal_alignment {
+                        HorizontalAlignment::Left => parent.positions.x + padding_config.left,
+                        HorizontalAlignment::Center => {
+                            parent.positions.x
+                                + (parent.dimensions.width
+                                    - child_bounding_box.width
+                                    - padding_config.left
+                                    - padding_config.right)
+                                    / 2.
+                        }
+                        HorizontalAlignment::Right => {
+                            parent.positions.x + parent.dimensions.width
+                                - child_bounding_box.width
+                                - padding_config.right
+                        }
+                    };
+
+                    for child in &parent.childs {
+                        let mut child = child.borrow_mut();
+
+                        child.positions.x = start_x + offset;
+                        offset += child.dimensions.width + child_gap;
+                    }
+                }
+                LayoutDirection::TopToBottom => {
+                    child_bounding_box.height += parent.childs.len() as f32 * child_gap;
+
+                    let mut offset = 0.;
+                    let start_y = match vertical_alignment {
+                        VerticalAlignment::Top => parent.positions.y + padding_config.top,
+                        VerticalAlignment::Center => {
+                            parent.positions.y
+                                + (parent.dimensions.height
+                                    - child_bounding_box.height
+                                    - padding_config.top
+                                    - padding_config.bottom)
+                                    / 2.
+                        }
+                        VerticalAlignment::Bottom => {
+                            parent.positions.y + parent.dimensions.height
+                                - child_bounding_box.height
+                                - padding_config.bottom
+                        }
+                    };
+
+                    for child in &parent.childs {
+                        let mut child = child.borrow_mut();
+
+                        child.positions.y = start_y + offset;
+                        offset += child.dimensions.height + child_gap;
                     }
                 }
             }
@@ -524,14 +635,13 @@ impl LayoutContext {
         }
     }
 
-    pub fn end_layout(&mut self) {
-        let root_element = Rc::new(RefCell::new(
-            self.element_stack
-                .pop_back()
-                .expect("Root Element must always be there."),
-        ));
+    pub fn end_layout(&mut self) -> Vec<RenderCommand> {
+        let mut root_element = self.element_stack.pop_back().expect("Root element must always be there");
 
-        let root_element_clone = Rc::clone(&root_element);
+        root_element.dimensions.width = root_element.element_config.borrow().width.max_val;
+        root_element.dimensions.height = root_element.element_config.borrow().height.max_val;
+
+        let root_element = Rc::new(RefCell::new(root_element));
 
         self.element_chain_bottomup.push(root_element);
 
@@ -559,24 +669,19 @@ impl LayoutContext {
         // Step 8: Positions
         self.position_element();
 
-        LayoutContext::recursive_dbg(root_element_clone);
-    }
+        let mut render_commands: Vec<RenderCommand> = Vec::new();
 
-    fn recursive_dbg(element: Rc<RefCell<Element>>) {
-        let element = element.borrow();
+        for element in &self.element_chain_bottomup {
+            let element = element.borrow();
 
-        println!(
-            "Element id: {} has x: {}, y: {}, width: {}, height: {}",
-            element.id,
-            element.positions.x,
-            element.positions.y,
-            element.dimensions.width,
-            element.dimensions.height
-        );
-
-        for child in &element.childs {
-            LayoutContext::recursive_dbg(Rc::clone(child));
+            render_commands.push(RenderCommand {
+                dimension: element.dimensions,
+                position: element.positions,
+                color: element.element_config.borrow().color,
+            });
         }
+
+        render_commands
     }
 
     fn open_element(&mut self, element_config: Rc<RefCell<ElementConfig>>) {

@@ -26,6 +26,7 @@ pub struct ElementConfig {
     pub gap: f32,
     pub child_alignment: AlignmentConfig,
     pub layout_direction: LayoutDirection,
+    pub color: Color,
 }
 
 #[derive(Clone, Copy)]
@@ -42,6 +43,14 @@ pub struct SizingConfig {
     pub min_val: f32,
     pub max_val: f32,
     pub percent: f32,
+}
+
+#[derive(Clone, Copy)]
+pub struct Color {
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
+    pub a: u8,
 }
 
 #[derive(Clone, Copy)]
@@ -90,23 +99,22 @@ pub struct Positions {
     pub y: f32,
 }
 
+pub struct RenderCommand {
+    pub dimension: Dimensions,
+    pub position: Positions,
+    pub color: Color,
+}
+
 impl Default for ElementConfig {
     fn default() -> Self {
         ElementConfig {
-            width: SizingConfig {
-                ..Default::default()
-            },
-            height: SizingConfig {
-                ..Default::default()
-            },
-            padding: PaddingConfig {
-                ..Default::default()
-            },
+            width: SizingConfig::default(),
+            height: SizingConfig::default(),
+            padding: PaddingConfig::default(),
             gap: 0.,
-            child_alignment: AlignmentConfig {
-                ..Default::default()
-            },
+            child_alignment: AlignmentConfig::default(),
             layout_direction: LayoutDirection::LeftToRight,
+            color: Color::default()
         }
     }
 }
@@ -154,5 +162,16 @@ impl Default for SizingConfig {
             max_val: 0.,
             percent: 0.,
         }
+    }
+}
+
+impl Default for Color {
+    fn default() -> Self {
+         Color {
+            r: 255,
+            g: 255,
+            b: 255,
+            a: 255,
+         }
     }
 }
