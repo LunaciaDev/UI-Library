@@ -432,10 +432,18 @@ impl LayoutContext {
                 remaining_dimensions = parent.dimensions.width
                     - parent_config.padding.left
                     - parent_config.padding.right;
+
+                if matches!(parent_config.layout_direction, LayoutDirection::LeftToRight) && parent.childs.len() > 1 {
+                    remaining_dimensions -= parent_config.gap * (parent.childs.len() - 1) as f32;
+                }
             } else {
                 remaining_dimensions = parent.dimensions.height
                     - parent_config.padding.top
                     - parent_config.padding.bottom;
+
+                if matches!(parent_config.layout_direction, LayoutDirection::TopToBottom) && parent.childs.len() > 1 {
+                    remaining_dimensions -= parent_config.gap * (parent.childs.len() - 1) as f32;
+                }
             }
 
             for child_ref in &parent.childs {
