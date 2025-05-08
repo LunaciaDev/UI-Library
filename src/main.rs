@@ -63,7 +63,7 @@ pub async fn main() {
             layout_context.add_element(
                 ElementConfig::new(ElementConfig {
                     // bright red
-                    width: SizingConfig::grow_clamped(50., 0.),
+                    width: SizingConfig::grow(),
                     height: SizingConfig::fixed(50.),
                     color: ui_library::Color {
                         r: 247,

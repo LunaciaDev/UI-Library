@@ -453,6 +453,7 @@ impl LayoutContext {
                 if x_axis {
                     if matches!(child_config.width.sizing_type, SizingType::Grow) {
                         grow_child_vec.push(Rc::clone(child_ref));
+                        remaining_dimensions -= child.dimensions.width;
                         continue;
                     }
 
@@ -460,6 +461,7 @@ impl LayoutContext {
                 } else {
                     if matches!(child_config.height.sizing_type, SizingType::Grow) {
                         grow_child_vec.push(Rc::clone(child_ref));
+                        remaining_dimensions -= child.dimensions.height;
                         continue;
                     }
 
