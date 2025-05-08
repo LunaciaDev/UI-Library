@@ -9,13 +9,21 @@ pub(crate) struct Element {
     pub grow_on_percent_mark: bool,
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
+pub struct TextMeasurement {
+    pub width: f32,
+    pub height: f32,
+    pub x_offset: f32,
+    pub y_offset: f32,
+}
+
 pub struct LayoutContext {
     // User need an instance of this struct in order to do anything, but all member must be hidden
     pub(crate) element_stack: VecDeque<Element>,
     pub(crate) top_id: u64,
     pub(crate) root_dimensions: Dimensions,
     pub(crate) element_chain_bottomup: Vec<Rc<RefCell<Element>>>,
+    pub(crate) measure_text: Box<dyn Fn(&str) -> TextMeasurement>,
 }
 
 #[derive(Clone, Copy)]

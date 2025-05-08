@@ -1,4 +1,4 @@
-use std::{cell::RefCell, cmp::Ordering, rc::Rc};
+use std::{cell::RefCell, cmp::Ordering, collections::VecDeque, rc::Rc};
 
 use crate::data_type::*;
 
@@ -105,12 +105,20 @@ impl LayoutContext {
     pub fn create_context(width: f32, height: f32) -> LayoutContext {
         LayoutContext {
             root_dimensions: Dimensions { width, height },
-            ..Default::default()
+            element_stack: VecDeque::new(),
+            top_id: 0,
+            element_chain_bottomup: Vec::new(),
+            measure_text: Box::new(|_| -> TextMeasurement { panic!("No text measurement was supplied") }),
         }
+    }
+
+    pub fn set_measurement_fn(&mut self, function: impl Fn(&str) -> TextMeasurement + 'static) {
+        self.measure_text = Box::new(function);
     }
 
     pub fn begin_layout(&mut self) {
         self.element_stack.clear();
+        self.element_chain_bottomup.clear();
         self.top_id = 1;
         self.element_stack.push_back(Element::new(
             0,
@@ -140,6 +148,9 @@ impl LayoutContext {
                             }
 
                             element.dimensions.width = width_accumulator;
+
+                            let gaps = element.element_config.borrow().gap;
+                            element.dimensions.width += (element.childs.len() - 1) as f32 * gaps;
                         },
                         LayoutDirection::TopToBottom => {
                             let mut max_width: f32 = 0.;
@@ -151,6 +162,9 @@ impl LayoutContext {
                             element.dimensions.width = max_width;
                         },
                     }
+
+                    let padding_width = element.element_config.borrow().padding.left + element.element_config.borrow().padding.right;
+                    element.dimensions.width += padding_width;
                 }
             }
             else {
@@ -175,8 +189,15 @@ impl LayoutContext {
                             }
 
                             element.dimensions.height = height_accumulator;
+
+                            let gap = element.element_config.borrow().gap;
+
+                            element.dimensions.height += (element.childs.len() - 1) as f32 * gap
                         },
                     }
+
+                    let padding_height = element.element_config.borrow().padding.top + element.element_config.borrow().padding.bottom;
+                    element.dimensions.height += padding_height;
                 }
             }
         }
@@ -671,7 +692,7 @@ impl LayoutContext {
 
         let mut render_commands: Vec<RenderCommand> = Vec::new();
 
-        for element in &self.element_chain_bottomup {
+        for element in (self.element_chain_bottomup).iter().rev() {
             let element = element.borrow();
 
             render_commands.push(RenderCommand {
