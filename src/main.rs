@@ -25,7 +25,7 @@ pub async fn main() {
     let obj: ExampleObj = ExampleObj {
         config: ElementConfig::new(ElementConfig {
             // black bg
-            width: SizingConfig::fit(),
+            width: SizingConfig::percent(0.5),
             height: SizingConfig::fit(),
             color: ui_library::Color {
                 r: 2,

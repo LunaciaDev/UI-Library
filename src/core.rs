@@ -702,6 +702,8 @@ impl LayoutContext {
 
         let mut render_commands: Vec<RenderCommand> = Vec::new();
 
+        self.element_chain_bottomup.pop();
+
         for element in (self.element_chain_bottomup).iter().rev() {
             let element = element.borrow();
 
