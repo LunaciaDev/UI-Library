@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use macroquad::prelude::*;
-use ui_library::{ElementConfig, LayoutContext, PaddingConfig, SizingConfig};
+use ui_library::{AlignmentConfig, ElementConfig, HorizontalAlignment, LayoutContext, LayoutDirection, PaddingConfig, SizingConfig, VerticalAlignment};
 
 struct ExampleObj {
     pub config: Rc<RefCell<ElementConfig>>,
@@ -35,63 +35,47 @@ pub async fn main() {
             },
             gap: 5.,
             padding: PaddingConfig::same_padding(5.),
+            layout_direction: LayoutDirection::TopToBottom,
             ..Default::default()
         }),
     };
 
     loop {
-        clear_background(BLACK);
+        clear_background(WHITE);
 
         layout_context.begin_layout();
-        layout_context.add_element(Rc::clone(&(obj.config)), |layout_context| {
-            layout_context.add_element(
-                ElementConfig::new(ElementConfig {
-                    // bright cyan
-                    width: SizingConfig::fixed(100.),
-                    height: SizingConfig::fixed(50.),
-                    color: ui_library::Color {
-                        r: 19,
-                        g: 235,
-                        b: 247,
-                        a: 255,
-                    },
-                    ..Default::default()
-                }),
-                |_| {},
-            );
-
-            layout_context.add_element(
-                ElementConfig::new(ElementConfig {
-                    // bright red
-                    width: SizingConfig::grow(),
-                    height: SizingConfig::fixed(50.),
-                    color: ui_library::Color {
-                        r: 247,
-                        g: 38,
-                        b: 19,
-                        a: 255,
-                    },
-                    gap: 5.,
-                    padding: PaddingConfig::same_padding(5.),
-                    ..Default::default()
-                }), |_| {});
-
-            layout_context.add_element(
-                ElementConfig::new(ElementConfig {
-                    // yellow
-                    width: SizingConfig::fixed(150.),
-                    height: SizingConfig::fixed(100.),
-                    color: ui_library::Color {
-                        r: 247,
-                        g: 224,
-                        b: 19,
-                        a: 255,
-                    },
-                    ..Default::default()
-                }),
-                |_| {},
-            );
-        });
+        layout_context.add_element(
+            ElementConfig::new(ElementConfig {
+                width: SizingConfig::grow(),
+                height: SizingConfig::grow(),
+                child_alignment: AlignmentConfig {
+                    align_y: VerticalAlignment::Center,
+                    align_x: HorizontalAlignment::Center,
+                },
+                color: ui_library::Color { r: 0, g: 0, b: 0, a: 255 },
+                ..Default::default()
+            }),
+            |layout_context| {
+                layout_context.add_element(
+                    ElementConfig::new(ElementConfig {
+                        width: SizingConfig::fixed(150.),
+                        height: SizingConfig::fixed(150.),
+                        color: ui_library::Color { r: 254, g: 1, b: 1, a: 255 },
+                        ..Default::default()
+                    }),
+                    |_| {},
+                );
+                layout_context.add_element(
+                    ElementConfig::new(ElementConfig {
+                        width: SizingConfig::fixed(200.),
+                        height: SizingConfig::fixed(200.),
+                        color: ui_library::Color { r: 1, g: 254, b: 1, a: 255 },
+                        ..Default::default()
+                    }),
+                    |_| {},
+                );
+            },
+        );
 
         let render_commands = layout_context.end_layout();
 

@@ -108,7 +108,9 @@ impl LayoutContext {
             element_stack: VecDeque::new(),
             top_id: 0,
             element_chain_bottomup: Vec::new(),
-            measure_text: Box::new(|_| -> TextMeasurement { panic!("No text measurement was supplied") }),
+            measure_text: Box::new(|_| -> TextMeasurement {
+                panic!("No text measurement was supplied")
+            }),
         }
     }
 
@@ -151,7 +153,7 @@ impl LayoutContext {
 
                             let gaps = element.element_config.borrow().gap;
                             element.dimensions.width += (element.childs.len() - 1) as f32 * gaps;
-                        },
+                        }
                         LayoutDirection::TopToBottom => {
                             let mut max_width: f32 = 0.;
 
@@ -160,14 +162,14 @@ impl LayoutContext {
                             }
 
                             element.dimensions.width = max_width;
-                        },
+                        }
                     }
 
-                    let padding_width = element.element_config.borrow().padding.left + element.element_config.borrow().padding.right;
+                    let padding_width = element.element_config.borrow().padding.left
+                        + element.element_config.borrow().padding.right;
                     element.dimensions.width += padding_width;
                 }
-            }
-            else {
+            } else {
                 let sizing_config = element.element_config.borrow().height;
 
                 if matches!(sizing_config.sizing_type, SizingType::Fit) {
@@ -180,7 +182,7 @@ impl LayoutContext {
                             }
 
                             element.dimensions.height = max_height;
-                        },
+                        }
                         LayoutDirection::TopToBottom => {
                             let mut height_accumulator = 0.;
 
@@ -193,10 +195,11 @@ impl LayoutContext {
                             let gap = element.element_config.borrow().gap;
 
                             element.dimensions.height += (element.childs.len() - 1) as f32 * gap
-                        },
+                        }
                     }
 
-                    let padding_height = element.element_config.borrow().padding.top + element.element_config.borrow().padding.bottom;
+                    let padding_height = element.element_config.borrow().padding.top
+                        + element.element_config.borrow().padding.bottom;
                     element.dimensions.height += padding_height;
                 }
             }
@@ -220,7 +223,7 @@ impl LayoutContext {
                When we are aligning against the layout direction however, each element align individually.
             */
 
-            let mut child_bounding_box = Dimensions::default();
+            let mut childs_boundingbox = Dimensions::default();
 
             for child in &parent.childs {
                 let mut child = child.borrow_mut();
@@ -228,7 +231,7 @@ impl LayoutContext {
 
                 match layout_direction {
                     LayoutDirection::LeftToRight => {
-                        child_bounding_box.width += child_dimensions.width;
+                        childs_boundingbox.width += child_dimensions.width;
 
                         match vertical_alignment {
                             VerticalAlignment::Top => {
@@ -250,7 +253,7 @@ impl LayoutContext {
                         }
                     }
                     LayoutDirection::TopToBottom => {
-                        child_bounding_box.height += child_dimensions.height;
+                        childs_boundingbox.height += child_dimensions.height;
 
                         match horizontal_alignment {
                             HorizontalAlignment::Left => {
@@ -277,7 +280,7 @@ impl LayoutContext {
 
             match layout_direction {
                 LayoutDirection::LeftToRight => {
-                    child_bounding_box.width += parent.childs.len() as f32 * child_gap;
+                    childs_boundingbox.width += parent.childs.len() as f32 * child_gap;
 
                     let mut offset = 0.;
                     let start_x = match horizontal_alignment {
@@ -285,14 +288,14 @@ impl LayoutContext {
                         HorizontalAlignment::Center => {
                             parent.positions.x
                                 + (parent.dimensions.width
-                                    - child_bounding_box.width
+                                    - childs_boundingbox.width
                                     - padding_config.left
                                     - padding_config.right)
                                     / 2.
                         }
                         HorizontalAlignment::Right => {
                             parent.positions.x + parent.dimensions.width
-                                - child_bounding_box.width
+                                - childs_boundingbox.width
                                 - padding_config.right
                         }
                     };
@@ -305,7 +308,7 @@ impl LayoutContext {
                     }
                 }
                 LayoutDirection::TopToBottom => {
-                    child_bounding_box.height += parent.childs.len() as f32 * child_gap;
+                    childs_boundingbox.height += parent.childs.len() as f32 * child_gap;
 
                     let mut offset = 0.;
                     let start_y = match vertical_alignment {
@@ -313,14 +316,14 @@ impl LayoutContext {
                         VerticalAlignment::Center => {
                             parent.positions.y
                                 + (parent.dimensions.height
-                                    - child_bounding_box.height
+                                    - childs_boundingbox.height
                                     - padding_config.top
                                     - padding_config.bottom)
                                     / 2.
                         }
                         VerticalAlignment::Bottom => {
                             parent.positions.y + parent.dimensions.height
-                                - child_bounding_box.height
+                                - childs_boundingbox.height
                                 - padding_config.bottom
                         }
                     };
@@ -383,14 +386,30 @@ impl LayoutContext {
     }
 
     fn grow_sizing(&mut self, x_axis: bool) {
+        /*
+            Why no shrinking? Actually, it is not possible with the current
+            configuration that an overflow may happen with grow elements being responsible.
+
+            Grow element has no "preferred size". Only min and max, and it'd take any value.
+            So if other childs already overflowed the parent, nothing can be done since
+            grow elements are already at min_value.
+
+            If later we introduce "preferred size" for grow element, then this become a bug.
+            But personally, I think preferred size is no-go. It makes reasoning with sizing
+            more complicated - does the Grow element try to size itself between min-max,
+            streching to max starting from min, or do they try to get as close as possible
+            to preferred size?
+        */
+
         for element in (self.element_chain_bottomup).iter().rev() {
             let parent = element.borrow_mut();
             let parent_config = parent.element_config.borrow();
 
             /*
-               If this is a grow element, then at this stage this element must have had a concrete value
-               (since it has already passed the grow constraint from the grandparent), thus any children
-               that is marked for awaiting a concrete grow value can (and must) be solved here.
+               If this is a grow element, then at this stage this element must have
+               had a concrete value (since it has already passed the grow
+               constraint from the grandparent), thus any children that is marked
+               for awaiting a concrete grow value can (and must) be solved here.
             */
 
             if x_axis {
@@ -423,9 +442,8 @@ impl LayoutContext {
             /*
                Growing algorithm also depend on the layout direction of the element.
                If it is growing alongside the layout direction, then sharing of the
-               grow value is necessary.
-               Otherwise, just give it the parent element value, surely this wont
-               bite. Heh.
+               grow value is necessary. Otherwise, just give it the parent element
+               value, surely this wont bite. Heh.
             */
 
             if x_axis {
@@ -433,7 +451,9 @@ impl LayoutContext {
                     - parent_config.padding.left
                     - parent_config.padding.right;
 
-                if matches!(parent_config.layout_direction, LayoutDirection::LeftToRight) && parent.childs.len() > 1 {
+                if matches!(parent_config.layout_direction, LayoutDirection::LeftToRight)
+                    && parent.childs.len() > 1
+                {
                     remaining_dimensions -= parent_config.gap * (parent.childs.len() - 1) as f32;
                 }
             } else {
@@ -441,31 +461,48 @@ impl LayoutContext {
                     - parent_config.padding.top
                     - parent_config.padding.bottom;
 
-                if matches!(parent_config.layout_direction, LayoutDirection::TopToBottom) && parent.childs.len() > 1 {
+                if matches!(parent_config.layout_direction, LayoutDirection::TopToBottom)
+                    && parent.childs.len() > 1
+                {
                     remaining_dimensions -= parent_config.gap * (parent.childs.len() - 1) as f32;
                 }
             }
 
             for child_ref in &parent.childs {
-                let child = child_ref.borrow();
+                let mut child = child_ref.borrow_mut();
                 let child_config = child.element_config.borrow();
 
                 if x_axis {
                     if matches!(child_config.width.sizing_type, SizingType::Grow) {
+                        if matches!(parent_config.layout_direction, LayoutDirection::TopToBottom) {
+                            drop(child_config);
+                            child.dimensions.width = remaining_dimensions;
+                            continue;
+                        }
+
                         grow_child_vec.push(Rc::clone(child_ref));
                         remaining_dimensions -= child.dimensions.width;
                         continue;
                     }
 
-                    remaining_dimensions -= child.dimensions.width;
+                    if matches!(parent_config.layout_direction, LayoutDirection::LeftToRight) {
+                        remaining_dimensions -= child.dimensions.width;
+                    }
                 } else {
                     if matches!(child_config.height.sizing_type, SizingType::Grow) {
+                        if matches!(parent_config.layout_direction, LayoutDirection::LeftToRight) {
+                            drop(child_config);
+                            child.dimensions.height = remaining_dimensions;
+                            continue;
+                        }
+
                         grow_child_vec.push(Rc::clone(child_ref));
                         remaining_dimensions -= child.dimensions.height;
                         continue;
                     }
-
-                    remaining_dimensions -= child.dimensions.height;
+                    if matches!(parent_config.layout_direction, LayoutDirection::TopToBottom) {
+                        remaining_dimensions -= child.dimensions.height;
+                    }
                 }
             }
 
@@ -667,7 +704,10 @@ impl LayoutContext {
     }
 
     pub fn end_layout(&mut self) -> Vec<RenderCommand> {
-        let mut root_element = self.element_stack.pop_back().expect("Root element must always be there");
+        let mut root_element = self
+            .element_stack
+            .pop_back()
+            .expect("Root element must always be there");
 
         root_element.dimensions.width = root_element.element_config.borrow().width.max_val;
         root_element.dimensions.height = root_element.element_config.borrow().height.max_val;
@@ -702,7 +742,15 @@ impl LayoutContext {
 
         let mut render_commands: Vec<RenderCommand> = Vec::new();
 
+        // remove the implicit root element (TODO: think about exposing this root to public for use?)
         self.element_chain_bottomup.pop();
+
+        /*
+            A consequence to using the stack is that element at the same level in the tree
+            will be drawn in reverse order of insertion. That is, if A and B is inserted
+            in that order and at the same level, this will create render command for B
+            before A.
+        */
 
         for element in (self.element_chain_bottomup).iter().rev() {
             let element = element.borrow();
