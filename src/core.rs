@@ -343,8 +343,12 @@ impl LayoutContext {
         for element in (self.element_chain_bottomup).iter().rev() {
             let parent = element.borrow();
 
-            for child in &parent.childs {
-                let mut child = child.borrow_mut();
+            if parent.childs.is_empty() {
+                return;
+            }
+
+            for child_index in 0..parent.childs.len() {
+                let mut child = parent.childs[child_index].borrow_mut();
 
                 if x_axis {
                     if matches!(
@@ -355,13 +359,37 @@ impl LayoutContext {
                         continue;
                     }
 
-                    if matches!(
+                    if !matches!(
                         child.element_config.borrow().width.sizing_type,
                         SizingType::Percent
                     ) {
-                        let percentage = child.element_config.borrow().width.percent;
+                        continue;
+                    }
 
-                        child.dimensions.width = parent.dimensions.width * percentage;
+                    let percentage = child.element_config.borrow().width.percent;
+
+                    child.dimensions.width = parent.dimensions.width * percentage;
+
+                    if child_index == 0 {
+                        child.dimensions.width -= parent.element_config.borrow().padding.left;
+                    }
+
+                    if child_index == parent.childs.len() - 1 {
+                        child.dimensions.width -= parent.element_config.borrow().padding.right;
+                    }
+
+                    if parent.childs.len() > 1
+                        && matches!(
+                            parent.element_config.borrow().layout_direction,
+                            LayoutDirection::LeftToRight
+                        )
+                    {
+                        child.dimensions.width -= parent.element_config.borrow().gap
+                            / if child_index == 0 || child_index == parent.childs.len() - 1 {
+                                2.
+                            } else {
+                                1.
+                            };
                     }
                 } else {
                     if matches!(
@@ -372,13 +400,37 @@ impl LayoutContext {
                         continue;
                     }
 
-                    if matches!(
+                    if !matches!(
                         child.element_config.borrow().height.sizing_type,
                         SizingType::Percent
                     ) {
-                        let percentage = child.element_config.borrow().height.percent;
+                        continue;
+                    }
 
-                        child.dimensions.height = parent.dimensions.height * percentage;
+                    let percentage = child.element_config.borrow().height.percent;
+
+                    child.dimensions.height = parent.dimensions.height * percentage;
+
+                    if child_index == 0 {
+                        child.dimensions.height -= parent.element_config.borrow().padding.top;
+                    }
+
+                    if child_index == parent.childs.len() - 1 {
+                        child.dimensions.height -= parent.element_config.borrow().padding.bottom;
+                    }
+
+                    if parent.childs.len() > 1
+                        && matches!(
+                            parent.element_config.borrow().layout_direction,
+                            LayoutDirection::TopToBottom
+                        )
+                    {
+                        child.dimensions.height -= parent.element_config.borrow().gap
+                            / if child_index == 0 || child_index == parent.childs.len() - 1 {
+                                2.
+                            } else {
+                                1.
+                            };
                     }
                 }
             }
@@ -414,24 +466,68 @@ impl LayoutContext {
 
             if x_axis {
                 if matches!(parent_config.width.sizing_type, SizingType::Grow) {
-                    for child in &parent.childs {
-                        let mut child = child.borrow_mut();
+                    for child_index in 0..parent.childs.len() {
+                        let mut child = parent.childs[child_index].borrow_mut();
 
                         if child.grow_on_percent_mark {
-                            let percentage_value = child.element_config.borrow().width.percent;
-                            child.dimensions.width = parent.dimensions.width * percentage_value;
-                            child.grow_on_percent_mark = false;
+                            let percentage = child.element_config.borrow().width.percent;
+
+                            child.dimensions.width = parent.dimensions.width * percentage;
+
+                            if child_index == 0 {
+                                child.dimensions.width -= parent.element_config.borrow().padding.left;
+                            }
+
+                            if child_index == parent.childs.len() - 1 {
+                                child.dimensions.width -= parent.element_config.borrow().padding.right;
+                            }
+
+                            if parent.childs.len() > 1
+                                && matches!(
+                                    parent.element_config.borrow().layout_direction,
+                                    LayoutDirection::LeftToRight
+                                )
+                            {
+                                child.dimensions.width -= parent.element_config.borrow().gap
+                                    / if child_index == 0 || child_index == parent.childs.len() - 1 {
+                                        2.
+                                    } else {
+                                        1.
+                                    };
+                            }
                         }
                     }
                 }
             } else if matches!(parent_config.height.sizing_type, SizingType::Grow) {
-                for child in &parent.childs {
-                    let mut child = child.borrow_mut();
+                for child_index in 0..parent.childs.len() {
+                    let mut child = parent.childs[child_index].borrow_mut();
 
                     if child.grow_on_percent_mark {
-                        let percentage_value = child.element_config.borrow().height.percent;
-                        child.dimensions.height = parent.dimensions.height * percentage_value;
-                        child.grow_on_percent_mark = false;
+                        let percentage = child.element_config.borrow().width.percent;
+
+                        child.dimensions.height = parent.dimensions.height * percentage;
+
+                        if child_index == 0 {
+                            child.dimensions.height -= parent.element_config.borrow().padding.top;
+                        }
+
+                        if child_index == parent.childs.len() - 1 {
+                            child.dimensions.height -= parent.element_config.borrow().padding.bottom;
+                        }
+
+                        if parent.childs.len() > 1
+                            && matches!(
+                                parent.element_config.borrow().layout_direction,
+                                LayoutDirection::TopToBottom
+                            )
+                        {
+                            child.dimensions.height -= parent.element_config.borrow().gap
+                                / if child_index == 0 || child_index == parent.childs.len() - 1 {
+                                    2.
+                                } else {
+                                    1.
+                                };
+                        }
                     }
                 }
             }

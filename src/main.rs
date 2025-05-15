@@ -1,11 +1,5 @@
-use std::{cell::RefCell, rc::Rc};
-
 use macroquad::prelude::*;
-use ui_library::{AlignmentConfig, ElementConfig, HorizontalAlignment, LayoutContext, LayoutDirection, PaddingConfig, SizingConfig, VerticalAlignment};
-
-struct ExampleObj {
-    pub config: Rc<RefCell<ElementConfig>>,
-}
+use ui_library::{ElementConfig, LayoutContext, PaddingConfig, SizingConfig};
 
 fn window_config() -> Conf {
     Conf {
@@ -22,24 +16,6 @@ fn window_config() -> Conf {
 pub async fn main() {
     let mut layout_context = LayoutContext::create_context(1280., 720.);
 
-    let obj: ExampleObj = ExampleObj {
-        config: ElementConfig::new(ElementConfig {
-            // black bg
-            width: SizingConfig::percent(0.5),
-            height: SizingConfig::fit(),
-            color: ui_library::Color {
-                r: 2,
-                g: 10,
-                b: 7,
-                a: 255,
-            },
-            gap: 5.,
-            padding: PaddingConfig::same_padding(5.),
-            layout_direction: LayoutDirection::TopToBottom,
-            ..Default::default()
-        }),
-    };
-
     loop {
         clear_background(WHITE);
 
@@ -47,18 +23,16 @@ pub async fn main() {
         layout_context.add_element(
             ElementConfig::new(ElementConfig {
                 width: SizingConfig::grow(),
-                height: SizingConfig::grow(),
-                child_alignment: AlignmentConfig {
-                    align_y: VerticalAlignment::Center,
-                    align_x: HorizontalAlignment::Center,
-                },
+                height: SizingConfig::fit(),
+                padding: PaddingConfig::same_padding(5.),
+                gap: 5.,
                 color: ui_library::Color { r: 0, g: 0, b: 0, a: 255 },
                 ..Default::default()
             }),
             |layout_context| {
                 layout_context.add_element(
                     ElementConfig::new(ElementConfig {
-                        width: SizingConfig::fixed(150.),
+                        width: SizingConfig::percent(0.5),
                         height: SizingConfig::fixed(150.),
                         color: ui_library::Color { r: 254, g: 1, b: 1, a: 255 },
                         ..Default::default()
@@ -67,7 +41,7 @@ pub async fn main() {
                 );
                 layout_context.add_element(
                     ElementConfig::new(ElementConfig {
-                        width: SizingConfig::fixed(200.),
+                        width: SizingConfig::percent(0.5),
                         height: SizingConfig::fixed(200.),
                         color: ui_library::Color { r: 1, g: 254, b: 1, a: 255 },
                         ..Default::default()
