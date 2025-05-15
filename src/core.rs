@@ -3,12 +3,12 @@ use std::{cell::RefCell, cmp::Ordering, collections::VecDeque, rc::Rc};
 use crate::data_type::*;
 
 impl ElementConfig {
-    pub fn new(config: ElementConfig) -> Rc<RefCell<ElementConfig>> {
-        Rc::new(RefCell::new(config))
+    pub fn new(config: ElementConfig) -> Rc<ElementConfig> {
+        Rc::new(config)
     }
 
-    pub fn new_from(config: Rc<RefCell<ElementConfig>>) -> Rc<RefCell<ElementConfig>> {
-        Rc::new(RefCell::new(*config.borrow()))
+    pub fn new_from(config: Rc<ElementConfig>) -> Rc<ElementConfig> {
+        Rc::new(*config)
     }
 }
 
@@ -89,7 +89,7 @@ impl AlignmentConfig {
 }
 
 impl Element {
-    pub fn new(id: u64, element_config: Rc<RefCell<ElementConfig>>) -> Element {
+    pub fn new(id: u64, element_config: Rc<ElementConfig>) -> Element {
         Element {
             dimensions: Dimensions::default(),
             positions: Positions::default(),
@@ -124,21 +124,21 @@ impl LayoutContext {
         self.top_id = 1;
         self.element_stack.push_back(Element::new(
             0,
-            Rc::new(RefCell::new(ElementConfig {
+            Rc::new(ElementConfig {
                 width: SizingConfig::fixed(self.root_dimensions.width),
                 height: SizingConfig::fixed(self.root_dimensions.height),
                 ..Default::default()
-            })),
+            }),
         ));
     }
 
     fn fit_sizing(&mut self, x_axis: bool) {
         for element in &self.element_chain_bottomup {
             let mut element = element.borrow_mut();
-            let layout_direction = element.element_config.borrow().layout_direction;
+            let layout_direction = element.element_config.layout_direction;
 
             if x_axis {
-                let sizing_config = element.element_config.borrow().width;
+                let sizing_config = element.element_config.width;
 
                 if matches!(sizing_config.sizing_type, SizingType::Fit) {
                     match layout_direction {
@@ -151,7 +151,7 @@ impl LayoutContext {
 
                             element.dimensions.width = width_accumulator;
 
-                            let gaps = element.element_config.borrow().gap;
+                            let gaps = element.element_config.gap;
                             element.dimensions.width += (element.childs.len() - 1) as f32 * gaps;
                         }
                         LayoutDirection::TopToBottom => {
@@ -165,12 +165,12 @@ impl LayoutContext {
                         }
                     }
 
-                    let padding_width = element.element_config.borrow().padding.left
-                        + element.element_config.borrow().padding.right;
+                    let padding_width = element.element_config.padding.left
+                        + element.element_config.padding.right;
                     element.dimensions.width += padding_width;
                 }
             } else {
-                let sizing_config = element.element_config.borrow().height;
+                let sizing_config = element.element_config.height;
 
                 if matches!(sizing_config.sizing_type, SizingType::Fit) {
                     match layout_direction {
@@ -192,14 +192,14 @@ impl LayoutContext {
 
                             element.dimensions.height = height_accumulator;
 
-                            let gap = element.element_config.borrow().gap;
+                            let gap = element.element_config.gap;
 
                             element.dimensions.height += (element.childs.len() - 1) as f32 * gap
                         }
                     }
 
-                    let padding_height = element.element_config.borrow().padding.top
-                        + element.element_config.borrow().padding.bottom;
+                    let padding_height = element.element_config.padding.top
+                        + element.element_config.padding.bottom;
                     element.dimensions.height += padding_height;
                 }
             }
@@ -210,11 +210,11 @@ impl LayoutContext {
         for element in (self.element_chain_bottomup).iter().rev() {
             let parent = element.borrow_mut();
 
-            let padding_config = parent.element_config.borrow().padding;
-            let child_gap = parent.element_config.borrow().gap;
-            let layout_direction = parent.element_config.borrow().layout_direction;
-            let horizontal_alignment = parent.element_config.borrow().child_alignment.align_x;
-            let vertical_alignment = parent.element_config.borrow().child_alignment.align_y;
+            let padding_config = parent.element_config.padding;
+            let child_gap = parent.element_config.gap;
+            let layout_direction = parent.element_config.layout_direction;
+            let horizontal_alignment = parent.element_config.child_alignment.align_x;
+            let vertical_alignment = parent.element_config.child_alignment.align_y;
 
             /*
                On Alignments:
@@ -352,7 +352,7 @@ impl LayoutContext {
 
                 if x_axis {
                     if matches!(
-                        parent.element_config.borrow().width.sizing_type,
+                        parent.element_config.width.sizing_type,
                         SizingType::Grow
                     ) {
                         child.grow_on_percent_mark = true;
@@ -360,31 +360,31 @@ impl LayoutContext {
                     }
 
                     if !matches!(
-                        child.element_config.borrow().width.sizing_type,
+                        child.element_config.width.sizing_type,
                         SizingType::Percent
                     ) {
                         continue;
                     }
 
-                    let percentage = child.element_config.borrow().width.percent;
+                    let percentage = child.element_config.width.percent;
 
                     child.dimensions.width = parent.dimensions.width * percentage;
 
                     if child_index == 0 {
-                        child.dimensions.width -= parent.element_config.borrow().padding.left;
+                        child.dimensions.width -= parent.element_config.padding.left;
                     }
 
                     if child_index == parent.childs.len() - 1 {
-                        child.dimensions.width -= parent.element_config.borrow().padding.right;
+                        child.dimensions.width -= parent.element_config.padding.right;
                     }
 
                     if parent.childs.len() > 1
                         && matches!(
-                            parent.element_config.borrow().layout_direction,
+                            parent.element_config.layout_direction,
                             LayoutDirection::LeftToRight
                         )
                     {
-                        child.dimensions.width -= parent.element_config.borrow().gap
+                        child.dimensions.width -= parent.element_config.gap
                             / if child_index == 0 || child_index == parent.childs.len() - 1 {
                                 2.
                             } else {
@@ -393,7 +393,7 @@ impl LayoutContext {
                     }
                 } else {
                     if matches!(
-                        parent.element_config.borrow().height.sizing_type,
+                        parent.element_config.height.sizing_type,
                         SizingType::Grow
                     ) {
                         child.grow_on_percent_mark = true;
@@ -401,31 +401,31 @@ impl LayoutContext {
                     }
 
                     if !matches!(
-                        child.element_config.borrow().height.sizing_type,
+                        child.element_config.height.sizing_type,
                         SizingType::Percent
                     ) {
                         continue;
                     }
 
-                    let percentage = child.element_config.borrow().height.percent;
+                    let percentage = child.element_config.height.percent;
 
                     child.dimensions.height = parent.dimensions.height * percentage;
 
                     if child_index == 0 {
-                        child.dimensions.height -= parent.element_config.borrow().padding.top;
+                        child.dimensions.height -= parent.element_config.padding.top;
                     }
 
                     if child_index == parent.childs.len() - 1 {
-                        child.dimensions.height -= parent.element_config.borrow().padding.bottom;
+                        child.dimensions.height -= parent.element_config.padding.bottom;
                     }
 
                     if parent.childs.len() > 1
                         && matches!(
-                            parent.element_config.borrow().layout_direction,
+                            parent.element_config.layout_direction,
                             LayoutDirection::TopToBottom
                         )
                     {
-                        child.dimensions.height -= parent.element_config.borrow().gap
+                        child.dimensions.height -= parent.element_config.gap
                             / if child_index == 0 || child_index == parent.childs.len() - 1 {
                                 2.
                             } else {
@@ -455,7 +455,7 @@ impl LayoutContext {
 
         for element in (self.element_chain_bottomup).iter().rev() {
             let parent = element.borrow_mut();
-            let parent_config = parent.element_config.borrow();
+            let parent_config = &parent.element_config;
 
             /*
                If this is a grow element, then at this stage this element must have
@@ -470,25 +470,25 @@ impl LayoutContext {
                         let mut child = parent.childs[child_index].borrow_mut();
 
                         if child.grow_on_percent_mark {
-                            let percentage = child.element_config.borrow().width.percent;
+                            let percentage = child.element_config.width.percent;
 
                             child.dimensions.width = parent.dimensions.width * percentage;
 
                             if child_index == 0 {
-                                child.dimensions.width -= parent.element_config.borrow().padding.left;
+                                child.dimensions.width -= parent.element_config.padding.left;
                             }
 
                             if child_index == parent.childs.len() - 1 {
-                                child.dimensions.width -= parent.element_config.borrow().padding.right;
+                                child.dimensions.width -= parent.element_config.padding.right;
                             }
 
                             if parent.childs.len() > 1
                                 && matches!(
-                                    parent.element_config.borrow().layout_direction,
+                                    parent.element_config.layout_direction,
                                     LayoutDirection::LeftToRight
                                 )
                             {
-                                child.dimensions.width -= parent.element_config.borrow().gap
+                                child.dimensions.width -= parent.element_config.gap
                                     / if child_index == 0 || child_index == parent.childs.len() - 1 {
                                         2.
                                     } else {
@@ -503,25 +503,25 @@ impl LayoutContext {
                     let mut child = parent.childs[child_index].borrow_mut();
 
                     if child.grow_on_percent_mark {
-                        let percentage = child.element_config.borrow().width.percent;
+                        let percentage = child.element_config.width.percent;
 
                         child.dimensions.height = parent.dimensions.height * percentage;
 
                         if child_index == 0 {
-                            child.dimensions.height -= parent.element_config.borrow().padding.top;
+                            child.dimensions.height -= parent.element_config.padding.top;
                         }
 
                         if child_index == parent.childs.len() - 1 {
-                            child.dimensions.height -= parent.element_config.borrow().padding.bottom;
+                            child.dimensions.height -= parent.element_config.padding.bottom;
                         }
 
                         if parent.childs.len() > 1
                             && matches!(
-                                parent.element_config.borrow().layout_direction,
+                                parent.element_config.layout_direction,
                                 LayoutDirection::TopToBottom
                             )
                         {
-                            child.dimensions.height -= parent.element_config.borrow().gap
+                            child.dimensions.height -= parent.element_config.gap
                                 / if child_index == 0 || child_index == parent.childs.len() - 1 {
                                     2.
                                 } else {
@@ -566,12 +566,11 @@ impl LayoutContext {
 
             for child_ref in &parent.childs {
                 let mut child = child_ref.borrow_mut();
-                let child_config = child.element_config.borrow();
+                let child_config = &child.element_config;
 
                 if x_axis {
                     if matches!(child_config.width.sizing_type, SizingType::Grow) {
                         if matches!(parent_config.layout_direction, LayoutDirection::TopToBottom) {
-                            drop(child_config);
                             child.dimensions.width = remaining_dimensions;
                             continue;
                         }
@@ -587,7 +586,6 @@ impl LayoutContext {
                 } else {
                     if matches!(child_config.height.sizing_type, SizingType::Grow) {
                         if matches!(parent_config.layout_direction, LayoutDirection::LeftToRight) {
-                            drop(child_config);
                             child.dimensions.height = remaining_dimensions;
                             continue;
                         }
@@ -658,7 +656,7 @@ impl LayoutContext {
                             let mut id = 0;
                             while id < index {
                                 let mut element = grow_child_vec[id].borrow_mut();
-                                let element_max_val = element.element_config.borrow().width.max_val;
+                                let element_max_val = element.element_config.width.max_val;
 
                                 // clamp the grow to the max_value, if applicable
                                 if element_max_val != 0. {
@@ -684,7 +682,7 @@ impl LayoutContext {
                         let mut id = 0;
                         while id < index {
                             let mut element = grow_child_vec[id].borrow_mut();
-                            let element_max_val = element.element_config.borrow().width.max_val;
+                            let element_max_val = element.element_config.width.max_val;
 
                             // clamp the grow to the max_value, if applicable
                             if element_max_val != 0. {
@@ -730,7 +728,7 @@ impl LayoutContext {
                             while id < index {
                                 let mut element = grow_child_vec[id].borrow_mut();
                                 let element_max_val =
-                                    element.element_config.borrow().height.max_val;
+                                    element.element_config.height.max_val;
 
                                 // clamp the grow to the max_value, if applicable
                                 if element_max_val != 0. {
@@ -756,7 +754,7 @@ impl LayoutContext {
                         let mut id = 0;
                         while id < index {
                             let mut element = grow_child_vec[id].borrow_mut();
-                            let element_max_val = element.element_config.borrow().height.max_val;
+                            let element_max_val = element.element_config.height.max_val;
 
                             // clamp the grow to the max_value, if applicable
                             if element_max_val != 0. {
@@ -805,8 +803,8 @@ impl LayoutContext {
             .pop_back()
             .expect("Root element must always be there");
 
-        root_element.dimensions.width = root_element.element_config.borrow().width.max_val;
-        root_element.dimensions.height = root_element.element_config.borrow().height.max_val;
+        root_element.dimensions.width = root_element.element_config.width.max_val;
+        root_element.dimensions.height = root_element.element_config.height.max_val;
 
         let root_element = Rc::new(RefCell::new(root_element));
 
@@ -854,14 +852,14 @@ impl LayoutContext {
             render_commands.push(RenderCommand {
                 dimension: element.dimensions,
                 position: element.positions,
-                color: element.element_config.borrow().color,
+                color: element.element_config.color,
             });
         }
 
         render_commands
     }
 
-    fn open_element(&mut self, element_config: Rc<RefCell<ElementConfig>>) {
+    fn open_element(&mut self, element_config: Rc<ElementConfig>) {
         self.element_stack
             .push_back(Element::new(self.top_id, element_config));
         self.top_id += 1;
@@ -880,7 +878,7 @@ impl LayoutContext {
 
         // Configure constant values
         {
-            let element_config = current_element.element_config.borrow();
+            let element_config = &current_element.element_config;
 
             match element_config.width.sizing_type {
                 SizingType::Fixed => {
@@ -912,7 +910,7 @@ impl LayoutContext {
 
     pub fn add_element(
         &mut self,
-        element_config: Rc<RefCell<ElementConfig>>,
+        element_config: Rc<ElementConfig>,
         inner_layout: fn(&mut LayoutContext),
     ) {
         self.open_element(element_config);

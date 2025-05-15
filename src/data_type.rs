@@ -5,7 +5,7 @@ pub(crate) struct Element {
     pub positions: Positions,
     pub childs: Vec<Rc<RefCell<Element>>>,
     pub id: u64,
-    pub element_config: Rc<RefCell<ElementConfig>>,
+    pub element_config: Rc<ElementConfig>,
     pub grow_on_percent_mark: bool,
 }
 
