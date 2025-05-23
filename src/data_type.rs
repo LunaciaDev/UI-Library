@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+use std::{cell::RefCell, collections::{HashMap, VecDeque}, rc::Rc};
 
 pub(crate) struct Element {
     pub dimensions: Dimensions,
@@ -7,6 +7,13 @@ pub(crate) struct Element {
     pub id: u64,
     pub element_config: Rc<ElementConfig>,
     pub grow_on_percent_mark: bool,
+
+    // text data
+    pub text_config: Option<Rc<TextConfig>>,
+    pub text: Option<String>,
+    // store broken-down texts childs.
+    // should be positioned relative to the parent.
+    pub text_childs: Vec<Rc<Element>>, 
 }
 
 #[derive(Clone, Copy, Default)]
@@ -17,13 +24,16 @@ pub struct TextMeasurement {
     pub y_offset: f32,
 }
 
+pub type TextMeasureFunction = dyn Fn(&str, u32, u16) -> TextMeasurement;
+
 pub struct LayoutContext {
     // User need an instance of this struct in order to do anything, but all member must be hidden
     pub(crate) element_stack: VecDeque<Element>,
     pub(crate) top_id: u64,
     pub(crate) root_dimensions: Dimensions,
     pub(crate) element_chain_bottomup: Vec<Rc<RefCell<Element>>>,
-    pub(crate) measure_text: Box<dyn Fn(&str) -> TextMeasurement>,
+    pub(crate) measure_text: Box<TextMeasureFunction>,
+    pub(crate) measurement_cache: HashMap<String, TextMeasurement>,
 }
 
 #[derive(Clone, Copy)]
@@ -35,6 +45,14 @@ pub struct ElementConfig {
     pub child_alignment: AlignmentConfig,
     pub layout_direction: LayoutDirection,
     pub color: Color,
+}
+
+#[derive(Clone, Copy)]
+pub struct TextConfig {
+    pub font_id: u32,
+    pub font_size: u16,
+    pub color: Color,
+    pub break_word: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -111,6 +129,8 @@ pub struct RenderCommand {
     pub dimension: Dimensions,
     pub position: Positions,
     pub color: Color,
+    pub text: Option<String>,
+    pub text_config: Option<TextConfig>,
 }
 
 impl Default for ElementConfig {
@@ -122,7 +142,7 @@ impl Default for ElementConfig {
             gap: 0.,
             child_alignment: AlignmentConfig::default(),
             layout_direction: LayoutDirection::LeftToRight,
-            color: Color::default()
+            color: Color::default(),
         }
     }
 }
@@ -175,11 +195,11 @@ impl Default for SizingConfig {
 
 impl Default for Color {
     fn default() -> Self {
-         Color {
+        Color {
             r: 255,
             g: 255,
             b: 255,
             a: 255,
-         }
+        }
     }
 }

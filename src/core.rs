@@ -1,7 +1,16 @@
-use std::{cell::RefCell, cmp::Ordering, collections::VecDeque, rc::Rc};
+use std::{
+    cell::RefCell,
+    cmp::Ordering,
+    collections::{HashMap, VecDeque},
+    rc::Rc,
+};
 
 use crate::data_type::*;
 
+/**
+ * TODO: REMOVE ALL POSSIBLE PANIC CODE WITH RESULT EQUIVALENT.
+ * TODO: ALSO REMOVE AS MANY CLONE ON THE TEXT MESS AS POSSIBLE.
+ */
 impl ElementConfig {
     pub fn new(config: ElementConfig) -> Rc<ElementConfig> {
         Rc::new(config)
@@ -97,6 +106,9 @@ impl Element {
             id,
             element_config,
             grow_on_percent_mark: false,
+            text_config: None,
+            text: None,
+            text_childs: Vec::new(),
         }
     }
 }
@@ -108,13 +120,17 @@ impl LayoutContext {
             element_stack: VecDeque::new(),
             top_id: 0,
             element_chain_bottomup: Vec::new(),
-            measure_text: Box::new(|_| -> TextMeasurement {
+            measure_text: Box::new(|_, _, _| -> TextMeasurement {
                 panic!("No text measurement was supplied")
             }),
+            measurement_cache: HashMap::new(),
         }
     }
 
-    pub fn set_measurement_fn(&mut self, function: impl Fn(&str) -> TextMeasurement + 'static) {
+    pub fn set_measurement_fn(
+        &mut self,
+        function: impl Fn(&str, u32, u16) -> TextMeasurement + 'static,
+    ) {
         self.measure_text = Box::new(function);
     }
 
@@ -165,8 +181,8 @@ impl LayoutContext {
                         }
                     }
 
-                    let padding_width = element.element_config.padding.left
-                        + element.element_config.padding.right;
+                    let padding_width =
+                        element.element_config.padding.left + element.element_config.padding.right;
                     element.dimensions.width += padding_width;
                 }
             } else {
@@ -198,8 +214,8 @@ impl LayoutContext {
                         }
                     }
 
-                    let padding_height = element.element_config.padding.top
-                        + element.element_config.padding.bottom;
+                    let padding_height =
+                        element.element_config.padding.top + element.element_config.padding.bottom;
                     element.dimensions.height += padding_height;
                 }
             }
@@ -351,18 +367,12 @@ impl LayoutContext {
                 let mut child = parent.childs[child_index].borrow_mut();
 
                 if x_axis {
-                    if matches!(
-                        parent.element_config.width.sizing_type,
-                        SizingType::Grow
-                    ) {
+                    if matches!(parent.element_config.width.sizing_type, SizingType::Grow) {
                         child.grow_on_percent_mark = true;
                         continue;
                     }
 
-                    if !matches!(
-                        child.element_config.width.sizing_type,
-                        SizingType::Percent
-                    ) {
+                    if !matches!(child.element_config.width.sizing_type, SizingType::Percent) {
                         continue;
                     }
 
@@ -392,18 +402,12 @@ impl LayoutContext {
                             };
                     }
                 } else {
-                    if matches!(
-                        parent.element_config.height.sizing_type,
-                        SizingType::Grow
-                    ) {
+                    if matches!(parent.element_config.height.sizing_type, SizingType::Grow) {
                         child.grow_on_percent_mark = true;
                         continue;
                     }
 
-                    if !matches!(
-                        child.element_config.height.sizing_type,
-                        SizingType::Percent
-                    ) {
+                    if !matches!(child.element_config.height.sizing_type, SizingType::Percent) {
                         continue;
                     }
 
@@ -489,7 +493,8 @@ impl LayoutContext {
                                 )
                             {
                                 child.dimensions.width -= parent.element_config.gap
-                                    / if child_index == 0 || child_index == parent.childs.len() - 1 {
+                                    / if child_index == 0 || child_index == parent.childs.len() - 1
+                                    {
                                         2.
                                     } else {
                                         1.
@@ -727,8 +732,7 @@ impl LayoutContext {
                             let mut id = 0;
                             while id < index {
                                 let mut element = grow_child_vec[id].borrow_mut();
-                                let element_max_val =
-                                    element.element_config.height.max_val;
+                                let element_max_val = element.element_config.height.max_val;
 
                                 // clamp the grow to the max_value, if applicable
                                 if element_max_val != 0. {
@@ -797,6 +801,94 @@ impl LayoutContext {
         }
     }
 
+    fn wrap_text(&mut self) {
+        for element in &self.element_chain_bottomup {
+            let mut element = element.borrow_mut();
+            let text_config = &element.text_config;
+
+            match text_config {
+                Some(text_config) => {
+                    // do not do anything if break-word is not allowed.
+                    if !text_config.break_word {
+                        continue;
+                    }
+
+                    // Since this is an immediate mode layout, a simple greedy text-breaking will suffice.
+                    let font_id = text_config.font_id;
+                    let font_size = text_config.font_size;
+                    let space_measurement = get_measurement(
+                        &mut self.measurement_cache,
+                        &self.measure_text,
+                        " ",
+                        font_id,
+                        font_size,
+                    );
+                    let text = match element.text.clone() {
+                        Some(str) => str,
+                        None => panic!("String disappeared"),
+                    };
+                    let word_list: Vec<&str> = text.split(" ").collect();
+
+                    let mut run_width: f32 = 0.;
+                    let mut run_height: f32 = 0.;
+                    let mut height_offset = 0.;
+                    let mut run_y_offset = 0.;
+                    let mut run_str: String = String::new();
+
+                    for word in word_list {
+                        let word_size = get_measurement(
+                            &mut self.measurement_cache,
+                            &self.measure_text,
+                            word,
+                            font_id,
+                            font_size,
+                        );
+
+                        // edge case: a single word is larger than the container's width
+                        // equality here can happen as 0. is assigned as base value.
+                        if run_width == 0. && word_size.width > element.dimensions.width {
+                            let mut text_element = create_text_element(element.id, word);
+                            text_element.positions.y = height_offset;
+                            height_offset += word_size.height;
+                            element.text_childs.push(Rc::new(text_element));
+                        }
+
+                        // if adding this word cause the current run to overflow
+                        if run_width + word_size.width + space_measurement.width
+                            > element.dimensions.width
+                        {
+                            let mut text_element = create_text_element(element.id, &run_str);
+                            text_element.positions.y = height_offset + run_y_offset;
+                            height_offset += run_height;
+                            run_str.clear();
+                            run_width = 0.;
+                            run_height = 0.;
+                            run_y_offset = 0.;
+                            element.text_childs.push(Rc::new(text_element));
+                        }
+
+                        if run_width != 0. {
+                            run_width += space_measurement.width;
+                            run_str += " ";
+                        }
+                        run_height = run_height.max(word_size.height);
+                        run_y_offset = run_y_offset.max(word_size.y_offset);
+                        run_width += word_size.width;
+                        run_str += word;
+                    }
+
+                    // push the remaining texts
+                    let mut text_element = create_text_element(element.id, &run_str);
+                    text_element.positions.y = height_offset + run_y_offset;
+                    height_offset += run_height;
+                    element.text_childs.push(Rc::new(text_element));
+                    element.dimensions.height = height_offset;
+                }
+                None => continue,
+            }
+        }
+    }
+
     pub fn end_layout(&mut self) -> Vec<RenderCommand> {
         let mut root_element = self
             .element_stack
@@ -821,6 +913,7 @@ impl LayoutContext {
         self.grow_sizing(true);
 
         // Step 4: Wrap Text
+        self.wrap_text();
 
         // Step 5: Fit Sizing Height
         self.fit_sizing(false);
@@ -849,10 +942,32 @@ impl LayoutContext {
         for element in (self.element_chain_bottomup).iter().rev() {
             let element = element.borrow();
 
+            if element.text_config.is_some() {
+                // this element has text within. We start creating render commands for text.
+
+                // TODO: fix up this horror....
+                for text_element in &element.text_childs {
+                    render_commands.push(RenderCommand {
+                        dimension: Dimensions::default(), // doesnt matter as the text dictate dimension. Just make thing confusing.
+                        position: Positions {
+                            x: element.positions.x,
+                            y: element.positions.y + text_element.positions.y,
+                        },
+                        color: Color::default(), // also doesnt matter
+                        text: text_element.text.clone(),
+                        text_config: Some(*(element.text_config.clone().expect("a"))),
+                    });
+                }
+
+                continue;
+            }
+
             render_commands.push(RenderCommand {
                 dimension: element.dimensions,
                 position: element.positions,
                 color: element.element_config.color,
+                text: None,
+                text_config: None,
             });
         }
 
@@ -869,12 +984,12 @@ impl LayoutContext {
         let mut current_element = self
             .element_stack
             .pop_back()
-            .expect("There must be an element here.");
+            .expect("The element stack cannot be empty");
 
         let mut parent_element = self
             .element_stack
             .pop_back()
-            .expect("It must have a parent element.");
+            .expect("Any element must have a parent element.");
 
         // Configure constant values
         {
@@ -917,4 +1032,102 @@ impl LayoutContext {
         inner_layout(self);
         self.close_element();
     }
+
+    /**
+     * Fit Sizing will cause the text to collapse
+     * TODO make better docs
+     */
+    pub fn add_text(
+        &mut self,
+        text: &str,
+        width: Option<SizingConfig>,
+        text_config: Rc<TextConfig>,
+    ) {
+        // text element cannot have children, so we implement custom logic instead of reusing
+        let mut current_element = Element::new(
+            self.top_id,
+            Rc::new(ElementConfig {
+                width: match width {
+                    Some(width) => {
+                        match width.sizing_type {
+                            // Fit Sizing will collapse the text, so we subtitude it with default
+                            SizingType::Fit => SizingConfig::grow(),
+                            _ => width,
+                        }
+                    }
+                    None => SizingConfig::grow(),
+                },
+                height: SizingConfig::fixed(0.),
+                ..Default::default()
+            }),
+        );
+
+        // Initialize sizing.
+        match current_element.element_config.width.sizing_type {
+            SizingType::Grow => {
+                let text_dimension =
+                    (self.measure_text)(text, text_config.font_id, text_config.font_size);
+                current_element.dimensions.width = text_dimension.width;
+            }
+            SizingType::Fixed => {
+                current_element.dimensions.width = current_element.element_config.width.min_val;
+            }
+            _ => {}
+        }
+
+        // create a copy of the text so we are not bound to the lifetime of user-supplied text
+        let text = text.to_owned();
+
+        let mut parent_element = self
+            .element_stack
+            .pop_back()
+            .expect("Any element must have a parent element.");
+
+        // add the text configuraiton
+        current_element.text_config = Some(text_config);
+        current_element.text = Some(text);
+
+        let current_element = Rc::new(RefCell::new(current_element));
+
+        parent_element.childs.push(Rc::clone(&current_element));
+        self.element_chain_bottomup.push(current_element);
+        self.element_stack.push_back(parent_element);
+    }
+}
+
+fn construct_key(word: &str, font_id: u32, font_size: u16) -> String {
+    font_id.to_string() + &font_size.to_string() + word
+}
+
+fn get_measurement(
+    measurement_cache: &mut HashMap<String, TextMeasurement>,
+    measure_text: impl Fn(&str, u32, u16) -> TextMeasurement,
+    text: &str,
+    font_id: u32,
+    font_size: u16,
+) -> TextMeasurement {
+    let key = construct_key(text, font_id, font_size);
+
+    match measurement_cache.get(&key) {
+        Some(val) => *val,
+        None => {
+            let text_measurement = (measure_text)(text, font_id, font_size);
+            measurement_cache.insert(key, text_measurement);
+            text_measurement
+        }
+    }
+}
+
+fn create_text_element(id: u64, text: &str) -> Element {
+    let mut element = Element::new(
+        id,
+        ElementConfig::new(ElementConfig {
+            width: SizingConfig::fixed(0.),
+            height: SizingConfig::fixed(0.),
+            ..Default::default()
+        }),
+    );
+    element.text = Some(text.to_owned());
+
+    element
 }
