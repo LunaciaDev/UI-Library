@@ -1,9 +1,7 @@
 use std::rc::Rc;
 
 use macroquad::prelude::*;
-use ui_library::{
-    ElementConfig, LayoutContext, SizingConfig, TextConfig, TextMeasurement,
-};
+use ui_library::{ElementConfig, LayoutContext, SizingConfig, TextConfig, TextMeasurement};
 
 fn window_config() -> Conf {
     Conf {
@@ -79,7 +77,16 @@ Duis vel vehicula ante, vitae scelerisque nunc. In semper, sem vel dignissim ali
                 },
                 ..Default::default()
             }),
-            |_| {},
+            |layout_context| {
+                layout_context.add_element(
+                    ElementConfig::new(ElementConfig {
+                        width: SizingConfig::fixed(width),
+                        height: SizingConfig::grow(),
+                        ..Default::default()
+                    }),
+                    |_| {},
+                );
+            },
         );
 
         let render_commands = layout_context.end_layout();

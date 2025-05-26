@@ -1023,10 +1023,10 @@ impl LayoutContext {
         self.element_stack.push_back(parent_element);
     }
 
-    pub fn add_element(
+    pub fn add_element<F: FnOnce(&mut LayoutContext)>(
         &mut self,
         element_config: Rc<ElementConfig>,
-        inner_layout: fn(&mut LayoutContext),
+        inner_layout: F,
     ) {
         self.open_element(element_config);
         inner_layout(self);
