@@ -1,7 +1,8 @@
-use std::rc::Rc;
-
 use macroquad::prelude::*;
-use ui_library::{ElementConfig, LayoutContext, SizingConfig, TextConfig, TextMeasurement};
+use ui_library::{
+    ElementConfig, FixedDimensionConfig, GrowDimensionConfig, LayoutContext, TextConfig,
+    TextMeasurement,
+};
 
 fn window_config() -> Conf {
     Conf {
@@ -47,28 +48,38 @@ Duis vel vehicula ante, vitae scelerisque nunc. In semper, sem vel dignissim ali
         }
 
         // layout
-        clear_background(WHITE);
+        clear_background(BLACK);
 
         layout_context.begin_layout();
         layout_context.add_text(
             text,
-            None,
-            Rc::new(TextConfig {
+            TextConfig {
+                width: ui_library::DimensionConfig::Grow(GrowDimensionConfig {
+                    min_size: 0.,
+                    max_size: 0.,
+                }),
+                height: ui_library::DimensionConfig::Grow(GrowDimensionConfig {
+                    min_size: 0.,
+                    max_size: 0.,
+                }),
                 font_id: 0,
                 font_size: 16,
-                color: ui_library::Color {
-                    r: 0,
-                    g: 0,
-                    b: 0,
+                font_color: ui_library::Color {
+                    r: 255,
+                    g: 255,
+                    b: 255,
                     a: 255,
                 },
                 break_word: true,
-            }),
+            },
         );
         layout_context.add_element(
             ElementConfig::new(ElementConfig {
-                width: SizingConfig::fixed(width),
-                height: SizingConfig::grow(),
+                width: ui_library::DimensionConfig::Fixed(FixedDimensionConfig { size: width }),
+                height: ui_library::DimensionConfig::Grow(GrowDimensionConfig {
+                    min_size: 0.,
+                    max_size: 0.,
+                }),
                 color: ui_library::Color {
                     r: 254,
                     g: 0,
@@ -77,52 +88,44 @@ Duis vel vehicula ante, vitae scelerisque nunc. In semper, sem vel dignissim ali
                 },
                 ..Default::default()
             }),
-            |layout_context| {
-                layout_context.add_element(
-                    ElementConfig::new(ElementConfig {
-                        width: SizingConfig::fixed(width),
-                        height: SizingConfig::grow(),
-                        ..Default::default()
-                    }),
-                    |_| {},
-                );
-            },
+            |_| {}
         );
 
         let render_commands = layout_context.end_layout();
 
         // draw
         for render_command in render_commands {
-            if render_command.text_config.is_some() {
-                let text_config = render_command.text_config.expect("text_config");
-                let text = render_command.text.expect("text");
-
-                draw_text(
-                    &text,
-                    render_command.position.x,
-                    render_command.position.y,
-                    text_config.font_size as f32,
-                    Color::from_rgba(
-                        text_config.color.r,
-                        text_config.color.g,
-                        text_config.color.b,
-                        text_config.color.a,
-                    ),
-                );
+            match render_command.render_data {
+                ui_library::RenderData::Text(text_render_data) => {
+                    draw_text(
+                        &text_render_data.text,
+                        render_command.position.x,
+                        render_command.position.y,
+                        text_render_data.font_size as f32,
+                        Color::from_rgba(
+                            text_render_data.font_color.r,
+                            text_render_data.font_color.g,
+                            text_render_data.font_color.b,
+                            text_render_data.font_color.a,
+                        ),
+                    );
+                }
+                ui_library::RenderData::Rectangle(rectangle_render_data) => {
+                    draw_rectangle(
+                        render_command.position.x,
+                        render_command.position.y,
+                        rectangle_render_data.dimenions.width,
+                        rectangle_render_data.dimenions.height,
+                        Color::from_rgba(
+                            rectangle_render_data.color.r,
+                            rectangle_render_data.color.g,
+                            rectangle_render_data.color.b,
+                            rectangle_render_data.color.a,
+                        ),
+                    );
+                }
+                _ => {}
             }
-
-            draw_rectangle(
-                render_command.position.x,
-                render_command.position.y,
-                render_command.dimension.width,
-                render_command.dimension.height,
-                Color::from_rgba(
-                    render_command.color.r,
-                    render_command.color.g,
-                    render_command.color.b,
-                    render_command.color.a,
-                ),
-            );
         }
 
         next_frame().await

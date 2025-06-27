@@ -21,44 +21,32 @@ impl ElementConfig {
     }
 }
 
-impl SizingConfig {
-    pub fn grow_clamped(min: f32, max: f32) -> SizingConfig {
-        SizingConfig {
-            sizing_type: SizingType::Grow,
-            min_val: min,
-            max_val: max,
-            ..Default::default()
-        }
+impl DimensionConfig {
+    pub fn fit() -> DimensionConfig {
+        DimensionConfig::Fit(FitSizingConfig { min_size: 0. })
     }
 
-    pub fn grow() -> SizingConfig {
-        SizingConfig {
-            sizing_type: SizingType::Grow,
-            min_val: 0.,
-            max_val: 0.,
-            ..Default::default()
-        }
+    pub fn fit_clamped(min_size: f32) -> DimensionConfig {
+        DimensionConfig::Fit(FitSizingConfig { min_size })
     }
 
-    pub fn fixed(val: f32) -> SizingConfig {
-        SizingConfig {
-            sizing_type: SizingType::Fixed,
-            min_val: val,
-            max_val: val,
-            ..Default::default()
-        }
+    pub fn grow() -> DimensionConfig {
+        DimensionConfig::Grow(GrowDimensionConfig {
+            min_size: 0.,
+            max_size: 0.,
+        })
     }
 
-    pub fn percent(percent: f32) -> SizingConfig {
-        SizingConfig {
-            sizing_type: SizingType::Percent,
-            percent,
-            ..Default::default()
-        }
+    pub fn grow_clamped(min_size: f32, max_size: f32) -> DimensionConfig {
+        DimensionConfig::Grow(GrowDimensionConfig { min_size, max_size })
     }
 
-    pub fn fit() -> SizingConfig {
-        SizingConfig::default()
+    pub fn fixed(size: f32) -> DimensionConfig {
+        DimensionConfig::Fixed(FixedDimensionConfig { size })
+    }
+
+    pub fn percent(percent: f32) -> DimensionConfig {
+        DimensionConfig::Percent(PercentDimenionConfig { percent })
     }
 }
 
@@ -89,6 +77,15 @@ impl PaddingConfig {
             left,
         }
     }
+
+    pub fn no_padding() -> PaddingConfig {
+        PaddingConfig {
+            left: 0.,
+            right: 0.,
+            top: 0.,
+            bottom: 0.,
+        }
+    }
 }
 
 impl AlignmentConfig {
@@ -98,17 +95,14 @@ impl AlignmentConfig {
 }
 
 impl Element {
-    pub fn new(id: u64, element_config: Rc<ElementConfig>) -> Element {
+    pub fn new(id: u64, element_config: TypeConfig) -> Element {
         Element {
             dimensions: Dimensions::default(),
-            positions: Positions::default(),
-            childs: Vec::new(),
             id,
+            position: Position::default(),
+            child_elements: Vec::new(),
             element_config,
             grow_on_percent_mark: false,
-            text_config: None,
-            text: None,
-            text_childs: Vec::new(),
         }
     }
 }
@@ -119,11 +113,11 @@ impl LayoutContext {
             root_dimensions: Dimensions { width, height },
             element_stack: VecDeque::new(),
             top_id: 0,
-            element_chain_bottomup: Vec::new(),
-            measure_text: Box::new(|_, _, _| -> TextMeasurement {
-                panic!("No text measurement was supplied")
+            element_tree_post_order: Vec::new(),
+            measure_text_fn: Box::new(|_, _, _| -> TextMeasurement {
+                panic!("No text measurement function was provided!")
             }),
-            measurement_cache: HashMap::new(),
+            measure_text_cache: HashMap::new(),
         }
     }
 
@@ -131,106 +125,146 @@ impl LayoutContext {
         &mut self,
         function: impl Fn(&str, u32, u16) -> TextMeasurement + 'static,
     ) {
-        self.measure_text = Box::new(function);
+        self.measure_text_fn = Box::new(function);
     }
 
     pub fn begin_layout(&mut self) {
         self.element_stack.clear();
-        self.element_chain_bottomup.clear();
+        self.element_tree_post_order.clear();
         self.top_id = 1;
         self.element_stack.push_back(Element::new(
             0,
-            Rc::new(ElementConfig {
-                width: SizingConfig::fixed(self.root_dimensions.width),
-                height: SizingConfig::fixed(self.root_dimensions.height),
+            TypeConfig::Rectangle(Rc::new(ElementConfig {
+                width: DimensionConfig::fixed(self.root_dimensions.width),
+                height: DimensionConfig::fixed(self.root_dimensions.height),
                 ..Default::default()
-            }),
+            })),
         ));
     }
 
     fn fit_sizing(&mut self, x_axis: bool) {
-        for element in &self.element_chain_bottomup {
+        for element in &self.element_tree_post_order {
             let mut element = element.borrow_mut();
-            let layout_direction = element.element_config.layout_direction;
 
-            if x_axis {
-                let sizing_config = element.element_config.width;
+            match element.element_config.clone() {
+                TypeConfig::Rectangle(element_config) => {
+                    let layout_direction = element_config.child_layout_direction;
 
-                if matches!(sizing_config.sizing_type, SizingType::Fit) {
-                    match layout_direction {
-                        LayoutDirection::LeftToRight => {
-                            let mut width_accumulator = 0.;
+                    if x_axis {
+                        if let DimensionConfig::Fit(fit_config) = element_config.width {
+                            match layout_direction {
+                                LayoutDirection::LeftToRight => {
+                                    let mut width_accumulator = 0.;
 
-                            for child in &element.childs {
-                                width_accumulator += child.borrow().dimensions.width;
+                                    for child in &element.child_elements {
+                                        width_accumulator += child.borrow().dimensions.width;
+                                    }
+
+                                    element.dimensions.width = width_accumulator;
+
+                                    let gaps = element_config.child_gap;
+                                    element.dimensions.width +=
+                                        (element.child_elements.len() - 1) as f32 * gaps;
+
+                                    // if the element is too small, clamp it to min_size
+                                    element.dimensions.width =
+                                        fit_config.min_size.max(element.dimensions.width);
+                                }
+                                LayoutDirection::TopToBottom => {
+                                    let mut max_width: f32 = 0.;
+
+                                    for child in &element.child_elements {
+                                        max_width = max_width.max(child.borrow().dimensions.width);
+                                    }
+
+                                    element.dimensions.width = max_width.max(fit_config.min_size);
+                                }
                             }
 
-                            element.dimensions.width = width_accumulator;
-
-                            let gaps = element.element_config.gap;
-                            element.dimensions.width += (element.childs.len() - 1) as f32 * gaps;
+                            let padding_width =
+                                element_config.padding.left + element_config.padding.right;
+                            element.dimensions.width += padding_width;
                         }
-                        LayoutDirection::TopToBottom => {
-                            let mut max_width: f32 = 0.;
+                    } else if let DimensionConfig::Fit(fit_config) = element_config.height {
+                        match layout_direction {
+                            LayoutDirection::LeftToRight => {
+                                let mut max_height: f32 = 0.;
 
-                            for child in &element.childs {
-                                max_width = max_width.max(child.borrow().dimensions.width);
+                                for child in &element.child_elements {
+                                    max_height = max_height.max(child.borrow().dimensions.height);
+                                }
+
+                                element.dimensions.height = max_height.max(fit_config.min_size);
                             }
+                            LayoutDirection::TopToBottom => {
+                                let mut height_accumulator = 0.;
 
-                            element.dimensions.width = max_width;
+                                for child in &element.child_elements {
+                                    height_accumulator += child.borrow().dimensions.height;
+                                }
+
+                                element.dimensions.height = height_accumulator;
+
+                                let gap = element_config.child_gap;
+
+                                element.dimensions.height +=
+                                    (element.child_elements.len() - 1) as f32 * gap;
+
+                                element.dimensions.height =
+                                    fit_config.min_size.max(element.dimensions.height);
+                            }
                         }
+
+                        let padding_height =
+                            element_config.padding.top + element_config.padding.bottom;
+                        element.dimensions.height += padding_height;
                     }
-
-                    let padding_width =
-                        element.element_config.padding.left + element.element_config.padding.right;
-                    element.dimensions.width += padding_width;
                 }
-            } else {
-                let sizing_config = element.element_config.height;
 
-                if matches!(sizing_config.sizing_type, SizingType::Fit) {
-                    match layout_direction {
-                        LayoutDirection::LeftToRight => {
-                            let mut max_height: f32 = 0.;
-
-                            for child in &element.childs {
-                                max_height = max_height.max(child.borrow().dimensions.height);
+                TypeConfig::Text(text_config) => {
+                    if x_axis {
+                        if let DimensionConfig::Fit(fit_config) = text_config.width {
+                            if fit_config.min_size != 0. {
+                                element.dimensions.width = fit_config.min_size
                             }
-
-                            element.dimensions.height = max_height;
-                        }
-                        LayoutDirection::TopToBottom => {
-                            let mut height_accumulator = 0.;
-
-                            for child in &element.childs {
-                                height_accumulator += child.borrow().dimensions.height;
-                            }
-
-                            element.dimensions.height = height_accumulator;
-
-                            let gap = element.element_config.gap;
-
-                            element.dimensions.height += (element.childs.len() - 1) as f32 * gap
                         }
                     }
 
-                    let padding_height =
-                        element.element_config.padding.top + element.element_config.padding.bottom;
-                    element.dimensions.height += padding_height;
+                    // this is disabled as we do not have text overflow yet.
+                    /*
+                    else if let DimensionConfig::Fit(fit_config) = text_config.height {
+                        if fit_config.min_size != 0. {
+                            element.dimensions.height = fit_config.min_size;
+                        }
+                    }
+                    */
                 }
             }
         }
     }
 
     fn position_element(&mut self) {
-        for element in (self.element_chain_bottomup).iter().rev() {
+        for element in (self.element_tree_post_order).iter().rev() {
             let parent = element.borrow_mut();
 
-            let padding_config = parent.element_config.padding;
-            let child_gap = parent.element_config.gap;
-            let layout_direction = parent.element_config.layout_direction;
-            let horizontal_alignment = parent.element_config.child_alignment.align_x;
-            let vertical_alignment = parent.element_config.child_alignment.align_y;
+            let padding_config;
+            let child_gap;
+            let layout_direction;
+            let horizontal_alignment;
+            let vertical_alignment;
+
+            match &parent.element_config {
+                TypeConfig::Rectangle(element_config) => {
+                    padding_config = element_config.padding;
+                    child_gap = element_config.child_gap;
+                    layout_direction = element_config.child_layout_direction;
+                    horizontal_alignment = element_config.child_alignment.align_x;
+                    vertical_alignment = element_config.child_alignment.align_y;
+                }
+                TypeConfig::Text(_) => {
+                    continue;
+                }
+            }
 
             /*
                On Alignments:
@@ -241,7 +275,7 @@ impl LayoutContext {
 
             let mut childs_boundingbox = Dimensions::default();
 
-            for child in &parent.childs {
+            for child in &parent.child_elements {
                 let mut child = child.borrow_mut();
                 let child_dimensions = child.dimensions;
 
@@ -251,10 +285,10 @@ impl LayoutContext {
 
                         match vertical_alignment {
                             VerticalAlignment::Top => {
-                                child.positions.y = parent.positions.y + padding_config.top;
+                                child.position.y = parent.position.y + padding_config.top;
                             }
                             VerticalAlignment::Bottom => {
-                                child.positions.y = parent.positions.y + parent.dimensions.height
+                                child.position.y = parent.position.y + parent.dimensions.height
                                     - padding_config.bottom
                                     - child.dimensions.height;
                             }
@@ -264,7 +298,7 @@ impl LayoutContext {
                                     - padding_config.top
                                     - padding_config.bottom)
                                     / 2.;
-                                child.positions.y = parent.positions.y + height_offset;
+                                child.position.y = parent.position.y + height_offset;
                             }
                         }
                     }
@@ -273,10 +307,10 @@ impl LayoutContext {
 
                         match horizontal_alignment {
                             HorizontalAlignment::Left => {
-                                child.positions.x = parent.positions.x + padding_config.left;
+                                child.position.x = parent.position.x + padding_config.left;
                             }
                             HorizontalAlignment::Right => {
-                                child.positions.x = parent.positions.x + parent.dimensions.width
+                                child.position.x = parent.position.x + parent.dimensions.width
                                     - padding_config.right
                                     - child.dimensions.width;
                             }
@@ -287,7 +321,7 @@ impl LayoutContext {
                                     - padding_config.right)
                                     / 2.;
 
-                                child.positions.x = parent.positions.x + width_offset;
+                                child.position.x = parent.position.x + width_offset;
                             }
                         }
                     }
@@ -296,13 +330,13 @@ impl LayoutContext {
 
             match layout_direction {
                 LayoutDirection::LeftToRight => {
-                    childs_boundingbox.width += parent.childs.len() as f32 * child_gap;
+                    childs_boundingbox.width += parent.child_elements.len() as f32 * child_gap;
 
                     let mut offset = 0.;
                     let start_x = match horizontal_alignment {
-                        HorizontalAlignment::Left => parent.positions.x + padding_config.left,
+                        HorizontalAlignment::Left => parent.position.x + padding_config.left,
                         HorizontalAlignment::Center => {
-                            parent.positions.x
+                            parent.position.x
                                 + (parent.dimensions.width
                                     - childs_boundingbox.width
                                     - padding_config.left
@@ -310,27 +344,27 @@ impl LayoutContext {
                                     / 2.
                         }
                         HorizontalAlignment::Right => {
-                            parent.positions.x + parent.dimensions.width
+                            parent.position.x + parent.dimensions.width
                                 - childs_boundingbox.width
                                 - padding_config.right
                         }
                     };
 
-                    for child in &parent.childs {
+                    for child in &parent.child_elements {
                         let mut child = child.borrow_mut();
 
-                        child.positions.x = start_x + offset;
+                        child.position.x = start_x + offset;
                         offset += child.dimensions.width + child_gap;
                     }
                 }
                 LayoutDirection::TopToBottom => {
-                    childs_boundingbox.height += parent.childs.len() as f32 * child_gap;
+                    childs_boundingbox.height += parent.child_elements.len() as f32 * child_gap;
 
                     let mut offset = 0.;
                     let start_y = match vertical_alignment {
-                        VerticalAlignment::Top => parent.positions.y + padding_config.top,
+                        VerticalAlignment::Top => parent.position.y + padding_config.top,
                         VerticalAlignment::Center => {
-                            parent.positions.y
+                            parent.position.y
                                 + (parent.dimensions.height
                                     - childs_boundingbox.height
                                     - padding_config.top
@@ -338,16 +372,16 @@ impl LayoutContext {
                                     / 2.
                         }
                         VerticalAlignment::Bottom => {
-                            parent.positions.y + parent.dimensions.height
+                            parent.position.y + parent.dimensions.height
                                 - childs_boundingbox.height
                                 - padding_config.bottom
                         }
                     };
 
-                    for child in &parent.childs {
+                    for child in &parent.child_elements {
                         let mut child = child.borrow_mut();
 
-                        child.positions.y = start_y + offset;
+                        child.position.y = start_y + offset;
                         offset += child.dimensions.height + child_gap;
                     }
                 }
@@ -356,85 +390,89 @@ impl LayoutContext {
     }
 
     fn percent_sizing(&mut self, x_axis: bool) {
-        for element in (self.element_chain_bottomup).iter().rev() {
+        for element in (self.element_tree_post_order).iter().rev() {
             let parent = element.borrow();
 
-            if parent.childs.is_empty() {
+            if parent.child_elements.is_empty() {
                 return;
             }
 
-            for child_index in 0..parent.childs.len() {
-                let mut child = parent.childs[child_index].borrow_mut();
+            if let TypeConfig::Rectangle(parent_config) = &parent.element_config {
+                let parent_undefined_size = matches!(parent_config.width, DimensionConfig::Grow(_));
+                let child_count = parent.child_elements.len();
 
-                if x_axis {
-                    if matches!(parent.element_config.width.sizing_type, SizingType::Grow) {
+                for child_index in 0..child_count {
+                    let mut child = parent.child_elements[child_index].borrow_mut();
+
+                    if parent_undefined_size {
                         child.grow_on_percent_mark = true;
                         continue;
                     }
 
-                    if !matches!(child.element_config.width.sizing_type, SizingType::Percent) {
-                        continue;
-                    }
+                    if x_axis {
+                        let width_config = match &child.element_config {
+                            TypeConfig::Rectangle(child_config) => child_config.width,
+                            TypeConfig::Text(child_text_config) => child_text_config.width,
+                        };
 
-                    let percentage = child.element_config.width.percent;
+                        if let DimensionConfig::Percent(percent_config) = width_config {
+                            child.dimensions.width =
+                                parent.dimensions.width * percent_config.percent;
 
-                    child.dimensions.width = parent.dimensions.width * percentage;
+                            if child_index == 0 {
+                                child.dimensions.width -= parent_config.padding.left;
+                            }
 
-                    if child_index == 0 {
-                        child.dimensions.width -= parent.element_config.padding.left;
-                    }
+                            if child_index == child_count - 1 {
+                                child.dimensions.width -= parent_config.padding.right;
+                            }
 
-                    if child_index == parent.childs.len() - 1 {
-                        child.dimensions.width -= parent.element_config.padding.right;
-                    }
+                            if child_count > 1
+                                && matches!(
+                                    parent_config.child_layout_direction,
+                                    LayoutDirection::LeftToRight
+                                )
+                            {
+                                child.dimensions.width -= parent_config.child_gap
+                                    / if child_index == 0 || child_index == child_count - 1 {
+                                        2.
+                                    } else {
+                                        1.
+                                    };
+                            }
+                        }
+                    } else {
+                        let height_config = match &child.element_config {
+                            TypeConfig::Rectangle(child_config) => child_config.height,
+                            TypeConfig::Text(child_text_config) => child_text_config.height,
+                        };
 
-                    if parent.childs.len() > 1
-                        && matches!(
-                            parent.element_config.layout_direction,
-                            LayoutDirection::LeftToRight
-                        )
-                    {
-                        child.dimensions.width -= parent.element_config.gap
-                            / if child_index == 0 || child_index == parent.childs.len() - 1 {
-                                2.
-                            } else {
-                                1.
-                            };
-                    }
-                } else {
-                    if matches!(parent.element_config.height.sizing_type, SizingType::Grow) {
-                        child.grow_on_percent_mark = true;
-                        continue;
-                    }
+                        if let DimensionConfig::Percent(percent_config) = height_config {
+                            child.dimensions.height =
+                                parent.dimensions.height * percent_config.percent;
 
-                    if !matches!(child.element_config.height.sizing_type, SizingType::Percent) {
-                        continue;
-                    }
+                            if child_index == 0 {
+                                child.dimensions.height -= parent_config.padding.top;
+                            }
 
-                    let percentage = child.element_config.height.percent;
+                            if child_index == child_count - 1 {
+                                child.dimensions.height -= parent_config.padding.bottom;
+                            }
 
-                    child.dimensions.height = parent.dimensions.height * percentage;
-
-                    if child_index == 0 {
-                        child.dimensions.height -= parent.element_config.padding.top;
-                    }
-
-                    if child_index == parent.childs.len() - 1 {
-                        child.dimensions.height -= parent.element_config.padding.bottom;
-                    }
-
-                    if parent.childs.len() > 1
-                        && matches!(
-                            parent.element_config.layout_direction,
-                            LayoutDirection::TopToBottom
-                        )
-                    {
-                        child.dimensions.height -= parent.element_config.gap
-                            / if child_index == 0 || child_index == parent.childs.len() - 1 {
-                                2.
-                            } else {
-                                1.
-                            };
+                            if child_count > 1
+                                && matches!(
+                                    parent_config.child_layout_direction,
+                                    LayoutDirection::TopToBottom
+                                )
+                            {
+                                child.dimensions.height -= parent_config.child_gap
+                                    / if child_index == 0 || child_index == child_count - 1 {
+                                        2.
+                                    } else {
+                                        1.
+                                    };
+                            }
+                        }
                     }
                 }
             }
@@ -457,9 +495,15 @@ impl LayoutContext {
             to preferred size?
         */
 
-        for element in (self.element_chain_bottomup).iter().rev() {
+        for element in (self.element_tree_post_order).iter().rev() {
             let parent = element.borrow_mut();
-            let parent_config = &parent.element_config;
+
+            let parent_config = match &parent.element_config {
+                TypeConfig::Rectangle(rect_conf) => rect_conf,
+
+                // text config cannot have children sizing
+                TypeConfig::Text(_) => continue,
+            };
 
             /*
                If this is a grow element, then at this stage this element must have
@@ -468,70 +512,92 @@ impl LayoutContext {
                for awaiting a concrete grow value can (and must) be solved here.
             */
 
+            let child_count = parent.child_elements.len();
+            let half_gap = parent_config.child_gap / 2.;
+
             if x_axis {
-                if matches!(parent_config.width.sizing_type, SizingType::Grow) {
-                    for child_index in 0..parent.childs.len() {
-                        let mut child = parent.childs[child_index].borrow_mut();
+                if let DimensionConfig::Grow(_) = parent_config.width {
+                    for child_index in 0..child_count {
+                        let mut child = parent.child_elements[child_index].borrow_mut();
+                        if !child.grow_on_percent_mark {
+                            continue;
+                        }
 
-                        if child.grow_on_percent_mark {
-                            let percentage = child.element_config.width.percent;
+                        let width_config = match &child.element_config {
+                            TypeConfig::Rectangle(rect_conf) => rect_conf.width,
+                            TypeConfig::Text(text_conf) => text_conf.width,
+                        };
 
-                            child.dimensions.width = parent.dimensions.width * percentage;
-
-                            if child_index == 0 {
-                                child.dimensions.width -= parent.element_config.padding.left;
+                        let width_percentage = match width_config {
+                            DimensionConfig::Percent(percentage_conf) => percentage_conf.percent,
+                            _ => {
+                                panic!("There is no other sizing type that depends on parent here")
                             }
+                        };
 
-                            if child_index == parent.childs.len() - 1 {
-                                child.dimensions.width -= parent.element_config.padding.right;
-                            }
+                        child.dimensions.width = parent.dimensions.width * width_percentage;
 
-                            if parent.childs.len() > 1
-                                && matches!(
-                                    parent.element_config.layout_direction,
-                                    LayoutDirection::LeftToRight
-                                )
-                            {
-                                child.dimensions.width -= parent.element_config.gap
-                                    / if child_index == 0 || child_index == parent.childs.len() - 1
-                                    {
-                                        2.
-                                    } else {
-                                        1.
-                                    };
+                        if child_index == 0 {
+                            child.dimensions.width -= parent_config.padding.left;
+                        }
+
+                        if child_index == child_count - 1 {
+                            child.dimensions.width -= parent_config.padding.right;
+                        }
+
+                        if child_count > 1
+                            && matches!(
+                                parent_config.child_layout_direction,
+                                LayoutDirection::LeftToRight
+                            )
+                        {
+                            if child_index == 0 || child_index == child_count - 1 {
+                                child.dimensions.width -= half_gap;
+                            } else {
+                                child.dimensions.width -= 2. * half_gap;
                             }
                         }
                     }
                 }
-            } else if matches!(parent_config.height.sizing_type, SizingType::Grow) {
-                for child_index in 0..parent.childs.len() {
-                    let mut child = parent.childs[child_index].borrow_mut();
+            } else if let DimensionConfig::Grow(_) = parent_config.height {
+                for child_index in 0..child_count {
+                    let mut child = parent.child_elements[child_index].borrow_mut();
+                    if !child.grow_on_percent_mark {
+                        continue;
+                    }
 
-                    if child.grow_on_percent_mark {
-                        let percentage = child.element_config.width.percent;
+                    let height_config = match &child.element_config {
+                        TypeConfig::Rectangle(rect_conf) => rect_conf.height,
+                        TypeConfig::Text(text_conf) => text_conf.height,
+                    };
 
-                        child.dimensions.height = parent.dimensions.height * percentage;
-
-                        if child_index == 0 {
-                            child.dimensions.height -= parent.element_config.padding.top;
+                    let height_percentage = match height_config {
+                        DimensionConfig::Percent(percentage_conf) => percentage_conf.percent,
+                        _ => {
+                            panic!("There is no other sizing type that depends on parent here")
                         }
+                    };
 
-                        if child_index == parent.childs.len() - 1 {
-                            child.dimensions.height -= parent.element_config.padding.bottom;
-                        }
+                    child.dimensions.height = parent.dimensions.height * height_percentage;
 
-                        if parent.childs.len() > 1
-                            && matches!(
-                                parent.element_config.layout_direction,
-                                LayoutDirection::TopToBottom
-                            )
-                        {
-                            child.dimensions.height -= parent.element_config.gap
-                                / if child_index == 0 || child_index == parent.childs.len() - 1 {
-                                    2.
-                                } else {
-                                    1.
-                                };
+                    if child_index == 0 {
+                        child.dimensions.height -= parent_config.padding.top;
+                    }
+
+                    if child_index == child_count - 1 {
+                        child.dimensions.height -= parent_config.padding.bottom;
+                    }
+
+                    if child_count > 1
+                        && matches!(
+                            parent_config.child_layout_direction,
+                            LayoutDirection::TopToBottom
+                        )
+                    {
+                        if child_index == 0 || child_index == child_count - 1 {
+                            child.dimensions.height -= half_gap;
+                        } else {
+                            child.dimensions.height -= 2. * half_gap;
                         }
                     }
                 }
@@ -552,30 +618,43 @@ impl LayoutContext {
                     - parent_config.padding.left
                     - parent_config.padding.right;
 
-                if matches!(parent_config.layout_direction, LayoutDirection::LeftToRight)
-                    && parent.childs.len() > 1
+                if matches!(
+                    parent_config.child_layout_direction,
+                    LayoutDirection::LeftToRight
+                ) && parent.child_elements.len() > 1
                 {
-                    remaining_dimensions -= parent_config.gap * (parent.childs.len() - 1) as f32;
+                    remaining_dimensions -=
+                        parent_config.child_gap * (parent.child_elements.len() - 1) as f32;
                 }
             } else {
                 remaining_dimensions = parent.dimensions.height
                     - parent_config.padding.top
                     - parent_config.padding.bottom;
 
-                if matches!(parent_config.layout_direction, LayoutDirection::TopToBottom)
-                    && parent.childs.len() > 1
+                if matches!(
+                    parent_config.child_layout_direction,
+                    LayoutDirection::TopToBottom
+                ) && parent.child_elements.len() > 1
                 {
-                    remaining_dimensions -= parent_config.gap * (parent.childs.len() - 1) as f32;
+                    remaining_dimensions -=
+                        parent_config.child_gap * (parent.child_elements.len() - 1) as f32;
                 }
             }
 
-            for child_ref in &parent.childs {
+            for child_ref in &parent.child_elements {
                 let mut child = child_ref.borrow_mut();
-                let child_config = &child.element_config;
 
                 if x_axis {
-                    if matches!(child_config.width.sizing_type, SizingType::Grow) {
-                        if matches!(parent_config.layout_direction, LayoutDirection::TopToBottom) {
+                    let width_config = match &child.element_config {
+                        TypeConfig::Rectangle(rect_conf) => rect_conf.width,
+                        TypeConfig::Text(text_conf) => text_conf.width,
+                    };
+
+                    if let DimensionConfig::Grow(_) = width_config {
+                        if matches!(
+                            parent_config.child_layout_direction,
+                            LayoutDirection::TopToBottom
+                        ) {
                             child.dimensions.width = remaining_dimensions;
                             continue;
                         }
@@ -585,12 +664,23 @@ impl LayoutContext {
                         continue;
                     }
 
-                    if matches!(parent_config.layout_direction, LayoutDirection::LeftToRight) {
+                    if matches!(
+                        parent_config.child_layout_direction,
+                        LayoutDirection::LeftToRight
+                    ) {
                         remaining_dimensions -= child.dimensions.width;
                     }
                 } else {
-                    if matches!(child_config.height.sizing_type, SizingType::Grow) {
-                        if matches!(parent_config.layout_direction, LayoutDirection::LeftToRight) {
+                    let height_config = match &child.element_config {
+                        TypeConfig::Rectangle(rect_conf) => rect_conf.height,
+                        TypeConfig::Text(text_conf) => text_conf.height,
+                    };
+
+                    if let DimensionConfig::Grow(_) = height_config {
+                        if matches!(
+                            parent_config.child_layout_direction,
+                            LayoutDirection::LeftToRight
+                        ) {
                             child.dimensions.height = remaining_dimensions;
                             continue;
                         }
@@ -599,7 +689,11 @@ impl LayoutContext {
                         remaining_dimensions -= child.dimensions.height;
                         continue;
                     }
-                    if matches!(parent_config.layout_direction, LayoutDirection::TopToBottom) {
+
+                    if matches!(
+                        parent_config.child_layout_direction,
+                        LayoutDirection::TopToBottom
+                    ) {
                         remaining_dimensions -= child.dimensions.height;
                     }
                 }
@@ -640,7 +734,10 @@ impl LayoutContext {
             // grow all childs to the biggest child.
             while index < grow_child_vec.len() {
                 if x_axis {
-                    if matches!(parent_config.layout_direction, LayoutDirection::TopToBottom) {
+                    if matches!(
+                        parent_config.child_layout_direction,
+                        LayoutDirection::TopToBottom
+                    ) {
                         {
                             let mut element = grow_child_vec[index].borrow_mut();
                             element.dimensions.width += remaining_dimensions;
@@ -661,25 +758,30 @@ impl LayoutContext {
                             let mut id = 0;
                             while id < index {
                                 let mut element = grow_child_vec[id].borrow_mut();
-                                let element_max_val = element.element_config.width.max_val;
+                                let width_config = match &element.element_config {
+                                    TypeConfig::Rectangle(rect_conf) => rect_conf.width,
+                                    TypeConfig::Text(text_conf) => text_conf.width,
+                                };
+                                if let DimensionConfig::Grow(width_config) = width_config {
+                                    let max_val = width_config.max_size;
 
-                                // clamp the grow to the max_value, if applicable
-                                if element_max_val != 0. {
-                                    let delta = element_max_val - element.dimensions.width;
-                                    remaining_dimensions -= delta;
-                                    element.dimensions.width = element_max_val;
+                                    // clamp the grow to the max_value, if applicable
+                                    if max_val != 0. {
+                                        let delta = max_val - element.dimensions.width;
+                                        remaining_dimensions -= delta;
+                                        element.dimensions.width = max_val;
 
-                                    drop(element);
+                                        drop(element);
 
-                                    grow_child_vec.remove(id);
-                                    index -= 1;
-                                    continue;
+                                        grow_child_vec.remove(id);
+                                        index -= 1;
+                                        continue;
+                                    }
+
+                                    element.dimensions.width = min_sizing;
+                                    id += 1;
                                 }
-
-                                element.dimensions.width = min_sizing;
-                                id += 1;
                             }
-
                             break;
                         }
 
@@ -687,31 +789,39 @@ impl LayoutContext {
                         let mut id = 0;
                         while id < index {
                             let mut element = grow_child_vec[id].borrow_mut();
-                            let element_max_val = element.element_config.width.max_val;
+                            let width_config = match &element.element_config {
+                                TypeConfig::Rectangle(rect_conf) => rect_conf.width,
+                                TypeConfig::Text(text_conf) => text_conf.width,
+                            };
+                            if let DimensionConfig::Grow(width_config) = width_config {
+                                let max_size = width_config.max_size;
+                                // clamp the grow to the max_value, if applicable
+                                if max_size != 0. {
+                                    let delta = max_size - element.dimensions.width;
+                                    remaining_dimensions -= delta;
+                                    element.dimensions.width = max_size;
 
-                            // clamp the grow to the max_value, if applicable
-                            if element_max_val != 0. {
-                                let delta = element_max_val - element.dimensions.width;
+                                    drop(element);
+
+                                    grow_child_vec.remove(id);
+                                    index -= 1;
+                                    id += 1;
+                                    continue;
+                                }
+
+                                let delta = min_sizing - element.dimensions.width;
+
+                                element.dimensions.width = min_sizing;
                                 remaining_dimensions -= delta;
-                                element.dimensions.width = element_max_val;
-
-                                drop(element);
-
-                                grow_child_vec.remove(id);
-                                index -= 1;
                                 id += 1;
-                                continue;
                             }
-
-                            let delta = min_sizing - element.dimensions.width;
-
-                            element.dimensions.width = min_sizing;
-                            remaining_dimensions -= delta;
-                            id += 1;
                         }
                     }
                 } else {
-                    if matches!(parent_config.layout_direction, LayoutDirection::LeftToRight) {
+                    if matches!(
+                        parent_config.child_layout_direction,
+                        LayoutDirection::LeftToRight
+                    ) {
                         {
                             let mut element = grow_child_vec[index].borrow_mut();
                             element.dimensions.height += remaining_dimensions;
@@ -732,23 +842,29 @@ impl LayoutContext {
                             let mut id = 0;
                             while id < index {
                                 let mut element = grow_child_vec[id].borrow_mut();
-                                let element_max_val = element.element_config.height.max_val;
+                                let height_config = match &element.element_config {
+                                    TypeConfig::Rectangle(rect_conf) => rect_conf.height,
+                                    TypeConfig::Text(text_conf) => text_conf.height,
+                                };
+                                if let DimensionConfig::Grow(height_config) = height_config {
+                                    let max_size = height_config.max_size;
 
-                                // clamp the grow to the max_value, if applicable
-                                if element_max_val != 0. {
-                                    let delta = element_max_val - element.dimensions.height;
-                                    remaining_dimensions -= delta;
-                                    element.dimensions.height = element_max_val;
+                                    // clamp the grow to the max_value, if applicable
+                                    if max_size != 0. {
+                                        let delta = max_size - element.dimensions.height;
+                                        remaining_dimensions -= delta;
+                                        element.dimensions.height = max_size;
 
-                                    drop(element);
+                                        drop(element);
 
-                                    grow_child_vec.remove(id);
-                                    index -= 1;
-                                    continue;
+                                        grow_child_vec.remove(id);
+                                        index -= 1;
+                                        continue;
+                                    }
+
+                                    element.dimensions.height = min_sizing;
+                                    id += 1;
                                 }
-
-                                element.dimensions.height = min_sizing;
-                                id += 1;
                             }
 
                             break;
@@ -758,27 +874,33 @@ impl LayoutContext {
                         let mut id = 0;
                         while id < index {
                             let mut element = grow_child_vec[id].borrow_mut();
-                            let element_max_val = element.element_config.height.max_val;
+                            let height_config = match &element.element_config {
+                                TypeConfig::Rectangle(rect_conf) => rect_conf.height,
+                                TypeConfig::Text(text_conf) => text_conf.height,
+                            };
+                            if let DimensionConfig::Grow(height_config) = height_config {
+                                let max_val = height_config.max_size;
 
-                            // clamp the grow to the max_value, if applicable
-                            if element_max_val != 0. {
-                                let delta = element_max_val - element.dimensions.height;
+                                // clamp the grow to the max_value, if applicable
+                                if max_val != 0. {
+                                    let delta = max_val - element.dimensions.height;
+                                    remaining_dimensions -= delta;
+                                    element.dimensions.height = max_val;
+
+                                    drop(element);
+
+                                    grow_child_vec.remove(id);
+                                    index -= 1;
+                                    id += 1;
+                                    continue;
+                                }
+
+                                let delta = min_sizing - element.dimensions.height;
+
+                                element.dimensions.height = min_sizing;
                                 remaining_dimensions -= delta;
-                                element.dimensions.height = element_max_val;
-
-                                drop(element);
-
-                                grow_child_vec.remove(id);
-                                index -= 1;
                                 id += 1;
-                                continue;
                             }
-
-                            let delta = min_sizing - element.dimensions.height;
-
-                            element.dimensions.height = min_sizing;
-                            remaining_dimensions -= delta;
-                            id += 1;
                         }
                     }
                 }
@@ -802,89 +924,88 @@ impl LayoutContext {
     }
 
     fn wrap_text(&mut self) {
-        for element in &self.element_chain_bottomup {
+        for element in &self.element_tree_post_order {
             let mut element = element.borrow_mut();
-            let text_config = &element.text_config;
+            let text_config = match &element.element_config {
+                TypeConfig::Text(text_config) => text_config,
+                _ => continue,
+            };
 
-            match text_config {
-                Some(text_config) => {
-                    // do not do anything if break-word is not allowed.
-                    if !text_config.break_word {
-                        continue;
-                    }
+            let mut text_lines: Vec<Rc<Element>> = Vec::new();
 
-                    // Since this is an immediate mode layout, a simple greedy text-breaking will suffice.
-                    let font_id = text_config.font_id;
-                    let font_size = text_config.font_size;
-                    let space_measurement = get_measurement(
-                        &mut self.measurement_cache,
-                        &self.measure_text,
-                        " ",
-                        font_id,
-                        font_size,
-                    );
-                    let text = match element.text.clone() {
-                        Some(str) => str,
-                        None => panic!("String disappeared"),
-                    };
-                    let word_list: Vec<&str> = text.split(" ").collect();
+            if !text_config.break_word {
+                continue;
+            }
 
-                    let mut run_width: f32 = 0.;
-                    let mut run_height: f32 = 0.;
-                    let mut height_offset = 0.;
-                    let mut run_y_offset = 0.;
-                    let mut run_str: String = String::new();
+            // Since this is an immediate mode layout, a simple greedy text-breaking will suffice.
+            let font_id = text_config.font_id;
+            let font_size = text_config.font_size;
+            let space_measurement = get_measurement(
+                &mut self.measure_text_cache,
+                &self.measure_text_fn,
+                " ",
+                font_id,
+                font_size,
+            );
+            let text = text_config.text.clone();
+            let word_list: Vec<&str> = text.split(" ").collect();
 
-                    for word in word_list {
-                        let word_size = get_measurement(
-                            &mut self.measurement_cache,
-                            &self.measure_text,
-                            word,
-                            font_id,
-                            font_size,
-                        );
+            let mut run_width: f32 = 0.;
+            let mut run_height: f32 = 0.;
+            let mut height_offset = 0.;
+            let mut run_y_offset = 0.;
+            let mut run_str: String = String::new();
 
-                        // edge case: a single word is larger than the container's width
-                        // equality here can happen as 0. is assigned as base value.
-                        if run_width == 0. && word_size.width > element.dimensions.width {
-                            let mut text_element = create_text_element(element.id, word);
-                            text_element.positions.y = height_offset;
-                            height_offset += word_size.height;
-                            element.text_childs.push(Rc::new(text_element));
-                        }
+            for word in word_list {
+                let word_size = get_measurement(
+                    &mut self.measure_text_cache,
+                    &self.measure_text_fn,
+                    word,
+                    font_id,
+                    font_size,
+                );
 
-                        // if adding this word cause the current run to overflow
-                        if run_width + word_size.width + space_measurement.width
-                            > element.dimensions.width
-                        {
-                            let mut text_element = create_text_element(element.id, &run_str);
-                            text_element.positions.y = height_offset + run_y_offset;
-                            height_offset += run_height;
-                            run_str.clear();
-                            run_width = 0.;
-                            run_height = 0.;
-                            run_y_offset = 0.;
-                            element.text_childs.push(Rc::new(text_element));
-                        }
-
-                        if run_width != 0. {
-                            run_width += space_measurement.width;
-                            run_str += " ";
-                        }
-                        run_height = run_height.max(word_size.height);
-                        run_y_offset = run_y_offset.max(word_size.y_offset);
-                        run_width += word_size.width;
-                        run_str += word;
-                    }
-
-                    // push the remaining texts
-                    let mut text_element = create_text_element(element.id, &run_str);
-                    text_element.positions.y = height_offset + run_y_offset;
-                    height_offset += run_height;
-                    element.text_childs.push(Rc::new(text_element));
-                    element.dimensions.height = height_offset;
+                // edge case: a single word is larger than the container's width
+                // equality here can happen as 0. is assigned as base value.
+                if run_width == 0. && word_size.width > element.dimensions.width {
+                    let mut text_element = create_text_element(element.id, word);
+                    text_element.position.y = height_offset;
+                    height_offset += word_size.height;
+                    text_lines.push(Rc::new(text_element));
                 }
-                None => continue,
+
+                // if adding this word cause the current run to overflow
+                if run_width + word_size.width + space_measurement.width > element.dimensions.width
+                {
+                    let mut text_element = create_text_element(element.id, &run_str);
+                    text_element.position.y = height_offset + run_y_offset;
+                    height_offset += run_height;
+                    run_str.clear();
+                    run_width = 0.;
+                    run_height = 0.;
+                    run_y_offset = 0.;
+                    text_lines.push(Rc::new(text_element));
+                }
+
+                if run_width != 0. {
+                    run_width += space_measurement.width;
+                    run_str += " ";
+                }
+                run_height = run_height.max(word_size.height);
+                run_y_offset = run_y_offset.max(word_size.y_offset);
+                run_width += word_size.width;
+                run_str += word;
+            }
+
+            // push the remaining texts
+            let mut text_element = create_text_element(element.id, &run_str);
+            text_element.position.y = height_offset + run_y_offset;
+            height_offset += run_height;
+            text_lines.push(Rc::new(text_element));
+            element.dimensions.height = height_offset;
+
+            if let TypeConfig::Text(text_config) = &mut element.element_config {
+                text_config.text_lines = text_lines;
             }
         }
     }
@@ -895,12 +1016,12 @@ impl LayoutContext {
             .pop_back()
             .expect("Root element must always be there");
 
-        root_element.dimensions.width = root_element.element_config.width.max_val;
-        root_element.dimensions.height = root_element.element_config.height.max_val;
+        root_element.dimensions.width = self.root_dimensions.width;
+        root_element.dimensions.height = self.root_dimensions.height;
 
         let root_element = Rc::new(RefCell::new(root_element));
 
-        self.element_chain_bottomup.push(root_element);
+        self.element_tree_post_order.push(root_element);
 
         // process the configuration
         // Step 1: Fit Sizing Width
@@ -930,7 +1051,7 @@ impl LayoutContext {
         let mut render_commands: Vec<RenderCommand> = Vec::new();
 
         // remove the implicit root element (TODO: think about exposing this root to public for use?)
-        self.element_chain_bottomup.pop();
+        self.element_tree_post_order.pop();
 
         /*
             A consequence to using the stack is that element at the same level in the tree
@@ -939,44 +1060,49 @@ impl LayoutContext {
             before A.
         */
 
-        for element in (self.element_chain_bottomup).iter().rev() {
+        for element in (self.element_tree_post_order).iter().rev() {
             let element = element.borrow();
 
-            if element.text_config.is_some() {
-                // this element has text within. We start creating render commands for text.
-
-                // TODO: fix up this horror....
-                for text_element in &element.text_childs {
+            match &element.element_config {
+                TypeConfig::Rectangle(element_config) => {
                     render_commands.push(RenderCommand {
-                        dimension: Dimensions::default(), // doesnt matter as the text dictate dimension. Just make thing confusing.
-                        position: Positions {
-                            x: element.positions.x,
-                            y: element.positions.y + text_element.positions.y,
-                        },
-                        color: Color::default(), // also doesnt matter
-                        text: text_element.text.clone(),
-                        text_config: Some(*(element.text_config.clone().expect("a"))),
+                        position: element.position,
+                        render_data: RenderData::Rectangle(RectangleRenderData {
+                            dimenions: element.dimensions,
+                            color: element_config.color,
+                        }),
                     });
                 }
-
-                continue;
+                TypeConfig::Text(element_config) => {
+                    for text_element in &element_config.text_lines {
+                        render_commands.push(RenderCommand {
+                            position: Position {
+                                x: element.position.x,
+                                y: element.position.y + text_element.position.y,
+                            },
+                            render_data: RenderData::Text(TextRenderData {
+                                font_id: element_config.font_id,
+                                text: match &text_element.element_config {
+                                    TypeConfig::Text(text_config) => text_config.text.clone(),
+                                    _ => panic!("This has to be text type config"),
+                                },
+                                font_size: element_config.font_size,
+                                font_color: element_config.font_color,
+                            }),
+                        });
+                    }
+                }
             }
-
-            render_commands.push(RenderCommand {
-                dimension: element.dimensions,
-                position: element.positions,
-                color: element.element_config.color,
-                text: None,
-                text_config: None,
-            });
         }
 
         render_commands
     }
 
     fn open_element(&mut self, element_config: Rc<ElementConfig>) {
-        self.element_stack
-            .push_back(Element::new(self.top_id, element_config));
+        self.element_stack.push_back(Element::new(
+            self.top_id,
+            TypeConfig::Rectangle(element_config),
+        ));
         self.top_id += 1;
     }
 
@@ -993,33 +1119,43 @@ impl LayoutContext {
 
         // Configure constant values
         {
-            let element_config = &current_element.element_config;
+            let width_config = match current_element.element_config {
+                TypeConfig::Rectangle(ref rect_conf) => rect_conf.width,
+                _ => panic!("Only rect config here."),
+            };
 
-            match element_config.width.sizing_type {
-                SizingType::Fixed => {
-                    current_element.dimensions.width = element_config.width.max_val;
+            match width_config {
+                DimensionConfig::Fixed(conf) => {
+                    current_element.dimensions.width = conf.size;
                 }
-                SizingType::Grow => {
-                    current_element.dimensions.width = element_config.width.min_val;
+                DimensionConfig::Grow(conf) => {
+                    current_element.dimensions.width = conf.min_size;
                 }
                 _ => {}
             }
 
-            match element_config.height.sizing_type {
-                SizingType::Fixed => {
-                    current_element.dimensions.height = element_config.height.max_val;
+            let height_config = match current_element.element_config {
+                TypeConfig::Rectangle(ref rect_conf) => rect_conf.height,
+                _ => panic!("Only rect config here."),
+            };
+
+            match height_config {
+                DimensionConfig::Fixed(conf) => {
+                    current_element.dimensions.height = conf.size;
                 }
-                SizingType::Grow => {
-                    current_element.dimensions.height = element_config.height.min_val;
+                DimensionConfig::Grow(conf) => {
+                    current_element.dimensions.height = conf.min_size;
                 }
                 _ => {}
-            }
+            };
         }
 
         let current_element = Rc::new(RefCell::new(current_element));
 
-        parent_element.childs.push(Rc::clone(&current_element));
-        self.element_chain_bottomup.push(current_element);
+        parent_element
+            .child_elements
+            .push(Rc::clone(&current_element));
+        self.element_tree_post_order.push(current_element);
         self.element_stack.push_back(parent_element);
     }
 
@@ -1037,61 +1173,55 @@ impl LayoutContext {
      * Fit Sizing will cause the text to collapse
      * TODO make better docs
      */
-    pub fn add_text(
-        &mut self,
-        text: &str,
-        width: Option<SizingConfig>,
-        text_config: Rc<TextConfig>,
-    ) {
-        // text element cannot have children, so we implement custom logic instead of reusing
-        let mut current_element = Element::new(
-            self.top_id,
-            Rc::new(ElementConfig {
-                width: match width {
-                    Some(width) => {
-                        match width.sizing_type {
-                            // Fit Sizing will collapse the text, so we subtitude it with default
-                            SizingType::Fit => SizingConfig::grow(),
-                            _ => width,
-                        }
-                    }
-                    None => SizingConfig::grow(),
-                },
-                height: SizingConfig::fixed(0.),
-                ..Default::default()
-            }),
-        );
+    pub fn add_text(&mut self, text: &str, text_config: TextConfig) {
+        // text element cannot have children, so we implement custom logic instead of reusing.
 
-        // Initialize sizing.
-        match current_element.element_config.width.sizing_type {
-            SizingType::Grow => {
-                let text_dimension =
-                    (self.measure_text)(text, text_config.font_id, text_config.font_size);
-                current_element.dimensions.width = text_dimension.width;
-            }
-            SizingType::Fixed => {
-                current_element.dimensions.width = current_element.element_config.width.min_val;
-            }
-            _ => {}
-        }
-
-        // create a copy of the text so we are not bound to the lifetime of user-supplied text
-        let text = text.to_owned();
+        let mut element_starting_width = 0.;
 
         let mut parent_element = self
             .element_stack
             .pop_back()
             .expect("Any element must have a parent element.");
 
-        // add the text configuraiton
-        current_element.text_config = Some(text_config);
-        current_element.text = Some(text);
+        match text_config.width {
+            DimensionConfig::Grow(_) => {
+                let text_dimension =
+                    (self.measure_text_fn)(text, text_config.font_id, text_config.font_size);
+                element_starting_width = text_dimension.width;
+            }
+            DimensionConfig::Fixed(fixed_config) => {
+                element_starting_width = fixed_config.size;
+            }
+            _ => {}
+        }
+
+        let text_config = InternalTextConfig::new_from(text, text_config);
+
+        let mut current_element = Element::new(self.top_id, TypeConfig::Text(text_config));
+        current_element.dimensions.width = element_starting_width;
 
         let current_element = Rc::new(RefCell::new(current_element));
 
-        parent_element.childs.push(Rc::clone(&current_element));
-        self.element_chain_bottomup.push(current_element);
+        parent_element
+            .child_elements
+            .push(Rc::clone(&current_element));
+        self.element_tree_post_order.push(current_element);
         self.element_stack.push_back(parent_element);
+    }
+}
+
+impl InternalTextConfig {
+    pub fn new_from(text: &str, text_config: TextConfig) -> InternalTextConfig {
+        InternalTextConfig {
+            width: text_config.width,
+            height: text_config.height,
+            font_id: text_config.font_id,
+            break_word: text_config.break_word,
+            text: Rc::from(text),
+            font_size: text_config.font_size,
+            font_color: text_config.font_color,
+            text_lines: Vec::new(),
+        }
     }
 }
 
@@ -1118,16 +1248,17 @@ fn get_measurement(
     }
 }
 
-fn create_text_element(id: u64, text: &str) -> Element {
-    let mut element = Element::new(
-        id,
-        ElementConfig::new(ElementConfig {
-            width: SizingConfig::fixed(0.),
-            height: SizingConfig::fixed(0.),
-            ..Default::default()
-        }),
-    );
-    element.text = Some(text.to_owned());
+fn create_text_element(element_id: u64, text: &str) -> Element {
+    let text_config = InternalTextConfig {
+        width: DimensionConfig::Fixed(FixedDimensionConfig { size: 0. }),
+        height: DimensionConfig::Fixed(FixedDimensionConfig { size: 0. }),
+        font_id: 0,
+        break_word: false,
+        text: Rc::from(text),
+        font_size: 0,
+        font_color: Color::default(),
+        text_lines: Vec::new(),
+    };
 
-    element
+    Element::new(element_id, TypeConfig::Text(text_config))
 }
